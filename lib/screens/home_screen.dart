@@ -80,7 +80,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     _tabController = TabController(length: 4, vsync: this);
     VpnService.initialize();
 
-    _addLog("IZZ TUNNELING Engine Initialized");
+    _addLog("Izz Tunnel Engine Initialized");
     _addLog("Core: sing-box (v1.10.0-native)");
 
     _vpnStateSub = VpnService.stateStream.listen((state) {
@@ -429,14 +429,36 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     return AppBar(
       backgroundColor: AppColors.primary,
       elevation: 0,
-      title: const Text(
-        "IZZ TUNNELING",
-        style: TextStyle(
-          fontSize: 16,
-          fontWeight: FontWeight.bold,
-          letterSpacing: 1.0,
-          color: Colors.white,
-        ),
+      title: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(3),
+            ),
+            child: const Text(
+              "IZ",
+              style: TextStyle(
+                color: AppColors.primary,
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          const Text(
+            "Izz Tunnel",
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 0.5,
+              color: Colors.white,
+            ),
+          ),
+        ],
       ),
       actions: [
         // File Icon (Open / Save Config)

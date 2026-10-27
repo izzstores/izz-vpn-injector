@@ -54,7 +54,7 @@ class CloudConfigResponse {
         [];
 
     return CloudConfigResponse(
-      appName: info['name'] as String? ?? 'IZZ TUNNELING',
+      appName: info['name'] as String? ?? 'Izz Tunnel',
       appVersion: info['version'] as String? ?? '1.0.0',
       minVersion: info['min_version'] as String? ?? '1.0.0',
       updateUrl: info['update_url'] as String? ?? 'https://t.me/izzcoyy',

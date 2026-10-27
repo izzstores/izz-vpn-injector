@@ -50,7 +50,7 @@ class ConfigStorageService {
       final box = context.findRenderObject() as RenderBox?;
       await Share.shareXFiles(
         [XFile(file.path, name: '$sanitizedName.izz', mimeType: 'application/octet-stream')],
-        text: 'Config IZZ TUNNELING: ${config.name}\n${config.note}',
+        text: 'Config Izz Tunnel: ${config.name}\n${config.note}',
         sharePositionOrigin: box != null ? box.localToGlobal(Offset.zero) & box.size : null,
       );
     } catch (e) {

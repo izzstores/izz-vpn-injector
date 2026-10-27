@@ -22,7 +22,7 @@ class IzzVpnApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: "IZZ TUNNELING",
+      title: "Izz Tunnel",
       debugShowCheckedModeBanner: false,
       themeMode: ThemeMode.dark,
       darkTheme: ThemeData(

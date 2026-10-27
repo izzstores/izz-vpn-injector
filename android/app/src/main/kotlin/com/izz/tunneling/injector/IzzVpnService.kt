@@ -51,7 +51,7 @@ class IzzVpnService : VpnService() {
 
             // Establish Android VpnService TUN Interface
             val builder = Builder()
-                .setSession("IZZ TUNNELING")
+                .setSession("Izz Tunnel")
                 .setMtu(1500)
                 .addAddress("172.19.0.1", 30)
                 .addDnsServer("1.1.1.1")
@@ -61,7 +61,7 @@ class IzzVpnService : VpnService() {
             vpnInterface = builder.establish()
             isRunning = true
 
-            updateNotification("✦ IZZ TUNNELING - Terhubung ✦")
+            updateNotification("Izz Tunnel - Terhubung")
             MainActivity.notifyStateChange("connected")
 
         } catch (e: Exception) {
@@ -94,7 +94,7 @@ class IzzVpnService : VpnService() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "IZZ TUNNELING Background Service",
+                "Izz Tunnel Background Service",
                 NotificationManager.IMPORTANCE_LOW
             )
             val manager = getSystemService(NotificationManager::class.java)
@@ -110,7 +110,7 @@ class IzzVpnService : VpnService() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("IZZ TUNNELING")
+            .setContentTitle("Izz Tunnel")
             .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_lock_lock)
             .setContentIntent(pendingIntent)

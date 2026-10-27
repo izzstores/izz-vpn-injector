@@ -45,16 +45,16 @@ jobs:
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: IZZ-TUNNELING-v1.0.1.apk
+          name: Izz-Tunnel-v1.0.2.apk
           path: build/app/outputs/flutter-apk/app-release.apk
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.1
-          name: "IZZ TUNNELING v1.0.1 (Release APK)"
+          tag_name: v1.0.2
+          name: "Izz Tunnel v1.0.2 (Release APK)"
           body: |
-            ## ✦ IZZ TUNNELING v1.0.1 (Release APK) ✦
+            ## ✦ Izz Tunnel v1.0.2 (Release APK) ✦
             
             Pembaruan Besar UI & Fitur Klasik (Classic HTTP Custom Style):
             - Tampilan solid tanpa gradasi warna (flat, non-AI aesthetic, classic green theme).
