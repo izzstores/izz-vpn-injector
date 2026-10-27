@@ -1,0 +1,74 @@
+name: Build & Release Android APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Release APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Setup Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Get Dependencies
+        run: flutter pub get
+
+      - name: Build Android Release APK
+        run: flutter build apk --release
+
+      - name: Verify APK Generated
+        run: |
+          ls -lh build/app/outputs/flutter-apk/
+          test -f build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: IZZ-TUNNELING-v1.0.0.apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0
+          name: "IZZ TUNNELING v1.0.0 (Release APK)"
+          body: |
+            ## ✦ IZZ TUNNELING - Android VPN Injector Client v1.0.0 ✦
+            
+            Aplikasi Android VPN Injector Dual-Mode (Simple Cloud 1-Klik + Custom Injector) terintegrasi langsung dengan Cloud VPS Autoscript.
+            
+            ### 📦 Informasi Unduhan:
+            - **Nama File:** `app-release.apk`
+            - **Arsitektur:** Universal (arm64-v8a, armeabi-v7a, x86_64)
+            - **Min Android:** Android 5.0 (Lollipop) ke atas
+            - **Target SDK:** Android 14 (API 34)
+            
+            ### ⚡ Cara Install di HP:
+            1. Unduh file `app-release.apk` di bawah.
+            2. Buka dan izinkan instalasi dari sumber tidak dikenal (*Unknown Sources*).
+            3. Buka aplikasi, pilih template paket operator Anda, masukkan akun, lalu klik **KONEK**.
+          files: build/app/outputs/flutter-apk/app-release.apk
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
