@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_spinkit/flutter_spinkit.dart';
+
 import '../constants/app_colors.dart';
 import '../services/vpn_service.dart';
 
@@ -89,10 +89,13 @@ class _ConnectionButtonState extends State<ConnectionButton>
                     ),
                     child: Center(
                       child: isWorking
-                          ? const SpinKitRing(
-                              color: AppColors.cyan,
-                              size: 50.0,
-                              lineWidth: 4.0,
+                          ? const SizedBox(
+                              width: 50,
+                              height: 50,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 4.0,
+                                valueColor: AlwaysStoppedAnimation<Color>(AppColors.cyan),
+                              ),
                             )
                           : Icon(
                               Icons.power_settings_new_rounded,
