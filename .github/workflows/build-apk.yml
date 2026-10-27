@@ -45,29 +45,26 @@ jobs:
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: IZZ-TUNNELING-v1.0.0.apk
+          name: IZZ-TUNNELING-v1.0.1.apk
           path: build/app/outputs/flutter-apk/app-release.apk
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.0
-          name: "IZZ TUNNELING v1.0.0 (Release APK)"
+          tag_name: v1.0.1
+          name: "IZZ TUNNELING v1.0.1 (Release APK)"
           body: |
-            ## ✦ IZZ TUNNELING - Android VPN Injector Client v1.0.0 ✦
+            ## ✦ IZZ TUNNELING v1.0.1 (Release APK) ✦
             
-            Aplikasi Android VPN Injector Dual-Mode (Simple Cloud 1-Klik + Custom Injector) terintegrasi langsung dengan Cloud VPS Autoscript.
-            
-            ### 📦 Informasi Unduhan:
-            - **Nama File:** `app-release.apk`
-            - **Arsitektur:** Universal (arm64-v8a, armeabi-v7a, x86_64)
-            - **Min Android:** Android 5.0 (Lollipop) ke atas
-            - **Target SDK:** Android 14 (API 34)
-            
-            ### ⚡ Cara Install di HP:
-            1. Unduh file `app-release.apk` di bawah.
-            2. Buka dan izinkan instalasi dari sumber tidak dikenal (*Unknown Sources*).
-            3. Buka aplikasi, pilih template paket operator Anda, masukkan akun, lalu klik **KONEK**.
+            Pembaruan Besar UI & Fitur Klasik (Classic HTTP Custom Style):
+            - Tampilan solid tanpa gradasi warna (flat, non-AI aesthetic, classic green theme).
+            - Metode SSH lengkap (Direct, HTTP Proxy, SSL/TLS Direct, SSL + Payload, WebSocket 80, WebSocket 443).
+            - Form input bersih dengan placeholder contoh (host.com) tanpa bocor domain asli.
+            - Fitur Save Config & Open Config (.izz / .hc) dengan proteksi Lock Config, Lock Account, Expiry Date, dan Password.
+            - Modul V2Ray / Xray lengkap (VMess, VLess, Trojan, Shadowsocks) dengan fitur Auto-Parse Link (Paste Link).
+            - Fitur Tools: Response Checker (Header Check), DNS Forwarder, IP Hunter, dan Tethering Hotspot Guide.
+            - Cloud Tricks tanpa lock server (member bebas memakai server VPS milik sendiri).
+            - Real-time Terminal Log Console.
           files: build/app/outputs/flutter-apk/app-release.apk
           draft: false
           prerelease: false

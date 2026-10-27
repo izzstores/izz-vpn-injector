@@ -1,15 +1,19 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../constants/app_colors.dart';
 import '../models/app_info_model.dart';
+import '../models/saved_config_model.dart';
 import '../models/template_model.dart';
 import '../services/api_service.dart';
 import '../services/config_builder.dart';
+import '../services/v2ray_parser.dart';
 import '../services/vpn_service.dart';
-import '../widgets/connection_button.dart';
+import '../widgets/config_dialogs.dart';
 import '../widgets/payload_box.dart';
 import '../widgets/stat_badge.dart';
+import 'tools_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -19,32 +23,48 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateMixin {
-  late TabController _modeTabController;
+  late TabController _tabController;
 
-  // Cloud Data
+  // Active Loaded Config (If imported)
+  SavedConfigModel? _loadedConfig;
+
+  // 1. SSH Custom Mode State
+  String _sshMethod = "ws_ssl"; // 'direct', 'http_proxy', 'ssl_direct', 'ssl_payload', 'ws_direct', 'ws_ssl'
+  final TextEditingController _sshServerCtrl = TextEditingController();
+  final TextEditingController _sshPortCtrl = TextEditingController(text: "443");
+  final TextEditingController _sshUserCtrl = TextEditingController();
+  final TextEditingController _sshPassCtrl = TextEditingController();
+  final TextEditingController _sshSniCtrl = TextEditingController();
+  final TextEditingController _sshProxyCtrl = TextEditingController();
+  final TextEditingController _sshPayloadCtrl = TextEditingController();
+  bool _obscureSshPass = true;
+
+  // 2. V2Ray / Xray Mode State
+  String _v2rayProtocol = "vmess"; // 'vmess', 'vless', 'trojan', 'shadowsocks'
+  final TextEditingController _v2rayLinkCtrl = TextEditingController();
+  final TextEditingController _v2rayServerCtrl = TextEditingController();
+  final TextEditingController _v2rayPortCtrl = TextEditingController(text: "443");
+  final TextEditingController _v2rayUuidCtrl = TextEditingController();
+  String _v2rayTransport = "ws";
+  final TextEditingController _v2rayPathCtrl = TextEditingController(text: "/vmess-ws");
+  final TextEditingController _v2raySniCtrl = TextEditingController();
+  String _v2rayTls = "tls";
+
+  // 3. Cloud Tricks Mode State (Templates without server lock)
   CloudConfigResponse? _cloudConfig;
   bool _isLoadingTemplates = false;
   String _selectedCategory = "All";
   TemplateModel? _selectedTemplate;
+  final TextEditingController _memberServerCtrl = TextEditingController();
+  final TextEditingController _memberPortCtrl = TextEditingController(text: "443");
+  final TextEditingController _memberUserCtrl = TextEditingController();
+  final TextEditingController _memberPassCtrl = TextEditingController();
 
-  // Simple Mode Inputs
-  final TextEditingController _simpleUserCtrl = TextEditingController();
-  final TextEditingController _simplePassCtrl = TextEditingController();
-  bool _rememberMe = true;
-  bool _obscurePass = true;
+  // 4. Live Terminal Logs
+  final List<String> _logs = [];
+  final ScrollController _logScrollController = ScrollController();
 
-  // Custom Mode Inputs
-  String _customProtocol = "ssh-ws";
-  final TextEditingController _customServerCtrl = TextEditingController(text: "rioaja.haikara.biz.id");
-  final TextEditingController _customPortCtrl = TextEditingController(text: "80");
-  final TextEditingController _customSniCtrl = TextEditingController(text: "zoom.us");
-  final TextEditingController _customPayloadCtrl = TextEditingController(
-    text: "GET / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf][crlf]",
-  );
-  final TextEditingController _customUserCtrl = TextEditingController();
-  final TextEditingController _customPassCtrl = TextEditingController();
-
-  // VPN State & Stats
+  // VPN Connection State
   VpnState _vpnState = VpnState.disconnected;
   StreamSubscription? _vpnStateSub;
   StreamSubscription? _vpnStatsSub;
@@ -57,15 +77,27 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   @override
   void initState() {
     super.initState();
-    _modeTabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     VpnService.initialize();
+
+    _addLog("IZZ TUNNELING Engine Initialized");
+    _addLog("Core: sing-box (v1.10.0-native)");
 
     _vpnStateSub = VpnService.stateStream.listen((state) {
       setState(() {
         _vpnState = state;
         if (state == VpnState.connected) {
+          _addLog("Status: CONNECTED! Tunnel interface active.");
           _startDurationTimer();
+        } else if (state == VpnState.connecting) {
+          _addLog("Status: Connecting to remote endpoint...");
+        } else if (state == VpnState.authenticating) {
+          _addLog("Status: Handshaking & Authenticating...");
+        } else if (state == VpnState.error) {
+          _addLog("Status: ERROR - Connection aborted or timed out.");
+          _stopDurationTimer();
         } else {
+          _addLog("Status: Disconnected.");
           _stopDurationTimer();
         }
       });
@@ -79,34 +111,56 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       });
     });
 
-    _loadSavedAccounts();
+    _loadPreferences();
     _fetchCloudTemplates();
   }
 
   @override
   void dispose() {
-    _modeTabController.dispose();
+    _tabController.dispose();
     _vpnStateSub?.cancel();
     _vpnStatsSub?.cancel();
     _durationTimer?.cancel();
-    _simpleUserCtrl.dispose();
-    _simplePassCtrl.dispose();
-    _customServerCtrl.dispose();
-    _customPortCtrl.dispose();
-    _customSniCtrl.dispose();
-    _customPayloadCtrl.dispose();
-    _customUserCtrl.dispose();
-    _customPassCtrl.dispose();
+    _logScrollController.dispose();
+    _sshServerCtrl.dispose();
+    _sshPortCtrl.dispose();
+    _sshUserCtrl.dispose();
+    _sshPassCtrl.dispose();
+    _sshSniCtrl.dispose();
+    _sshProxyCtrl.dispose();
+    _sshPayloadCtrl.dispose();
+    _v2rayLinkCtrl.dispose();
+    _v2rayServerCtrl.dispose();
+    _v2rayPortCtrl.dispose();
+    _v2rayUuidCtrl.dispose();
+    _v2rayPathCtrl.dispose();
+    _v2raySniCtrl.dispose();
+    _memberServerCtrl.dispose();
+    _memberPortCtrl.dispose();
+    _memberUserCtrl.dispose();
+    _memberPassCtrl.dispose();
     super.dispose();
+  }
+
+  void _addLog(String msg) {
+    final now = DateTime.now();
+    final timeStr = "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}";
+    setState(() {
+      _logs.add("[$timeStr] $msg");
+      if (_logs.length > 300) _logs.removeAt(0);
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_logScrollController.hasClients) {
+        _logScrollController.jumpTo(_logScrollController.position.maxScrollExtent);
+      }
+    });
   }
 
   void _startDurationTimer() {
     _durationTimer?.cancel();
     _connectedSeconds = 0;
     _durationTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      setState(() {
-        _connectedSeconds++;
-      });
+      setState(() => _connectedSeconds++);
     });
   }
 
@@ -123,98 +177,222 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     return "$h:$m:$s";
   }
 
-  Future<void> _loadSavedAccounts() async {
+  Future<void> _loadPreferences() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      _simpleUserCtrl.text = prefs.getString("simple_user") ?? "";
-      _simplePassCtrl.text = prefs.getString("simple_pass") ?? "";
-      _customUserCtrl.text = prefs.getString("custom_user") ?? "";
-      _customPassCtrl.text = prefs.getString("custom_pass") ?? "";
+      _sshServerCtrl.text = prefs.getString("ssh_server") ?? "";
+      _sshPortCtrl.text = prefs.getString("ssh_port") ?? "443";
+      _sshUserCtrl.text = prefs.getString("ssh_user") ?? "";
+      _sshPassCtrl.text = prefs.getString("ssh_pass") ?? "";
+      _sshSniCtrl.text = prefs.getString("ssh_sni") ?? "";
+      _sshProxyCtrl.text = prefs.getString("ssh_proxy") ?? "";
+      _sshPayloadCtrl.text = prefs.getString("ssh_payload") ?? "";
+      _memberServerCtrl.text = prefs.getString("member_server") ?? "";
+      _memberPortCtrl.text = prefs.getString("member_port") ?? "443";
+      _memberUserCtrl.text = prefs.getString("member_user") ?? "";
+      _memberPassCtrl.text = prefs.getString("member_pass") ?? "";
     });
   }
 
-  Future<void> _saveAccounts() async {
+  Future<void> _savePreferences() async {
     final prefs = await SharedPreferences.getInstance();
-    if (_rememberMe) {
-      await prefs.setString("simple_user", _simpleUserCtrl.text);
-      await prefs.setString("simple_pass", _simplePassCtrl.text);
-      await prefs.setString("custom_user", _customUserCtrl.text);
-      await prefs.setString("custom_pass", _customPassCtrl.text);
-    }
+    await prefs.setString("ssh_server", _sshServerCtrl.text);
+    await prefs.setString("ssh_port", _sshPortCtrl.text);
+    await prefs.setString("ssh_user", _sshUserCtrl.text);
+    await prefs.setString("ssh_pass", _sshPassCtrl.text);
+    await prefs.setString("ssh_sni", _sshSniCtrl.text);
+    await prefs.setString("ssh_proxy", _sshProxyCtrl.text);
+    await prefs.setString("ssh_payload", _sshPayloadCtrl.text);
+    await prefs.setString("member_server", _memberServerCtrl.text);
+    await prefs.setString("member_port", _memberPortCtrl.text);
+    await prefs.setString("member_user", _memberUserCtrl.text);
+    await prefs.setString("member_pass", _memberPassCtrl.text);
   }
 
   Future<void> _fetchCloudTemplates() async {
     setState(() => _isLoadingTemplates = true);
+    _addLog("Cloud: Fetching tricks & payload templates...");
     final resp = await ApiService.fetchTemplates();
     setState(() {
       _isLoadingTemplates = false;
       if (resp != null) {
         _cloudConfig = resp;
-        if (resp.templates.isNotEmpty) {
+        _addLog("Cloud: ${resp.templates.length} tricks loaded (v${resp.appVersion}).");
+        if (resp.templates.isNotEmpty && _selectedTemplate == null) {
           _selectedTemplate = resp.templates.first;
         }
+      } else {
+        _addLog("Cloud: Failed to fetch templates or offline.");
       }
     });
+  }
+
+  void _parsePastedV2RayLink() {
+    final raw = _v2rayLinkCtrl.text.trim();
+    if (raw.isEmpty) return;
+
+    final parsed = V2RayParser.parse(raw);
+    if (parsed != null) {
+      setState(() {
+        _v2rayProtocol = parsed.protocol;
+        _v2rayServerCtrl.text = parsed.server;
+        _v2rayPortCtrl.text = parsed.port.toString();
+        _v2rayUuidCtrl.text = parsed.uuid;
+        _v2rayTransport = parsed.transport;
+        _v2rayPathCtrl.text = parsed.path;
+        _v2raySniCtrl.text = parsed.sni;
+        _v2rayTls = parsed.security;
+      });
+      _addLog("V2Ray: Parsed ${parsed.protocol.toUpperCase()} config for ${parsed.server}");
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Berhasil mem-parsing link ${parsed.protocol.toUpperCase()}!"), backgroundColor: AppColors.primary),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Format link V2Ray tidak dikenali!"), backgroundColor: AppColors.error),
+      );
+    }
+  }
+
+  void _applyLoadedConfig(SavedConfigModel config) {
+    setState(() {
+      _loadedConfig = config;
+      if (config.mode == "v2ray") {
+        _tabController.animateTo(1);
+        _v2rayProtocol = config.v2rayProtocol;
+        _v2rayServerCtrl.text = config.server;
+        _v2rayPortCtrl.text = config.port.toString();
+        if (config.isAccountLocked) {
+          _v2rayUuidCtrl.text = config.v2rayUuid;
+        }
+        _v2rayTransport = config.v2rayTransport;
+        _v2rayPathCtrl.text = config.v2rayPath;
+        _v2raySniCtrl.text = config.sni;
+        _v2rayTls = config.v2rayTls;
+      } else {
+        _tabController.animateTo(0);
+        _sshMethod = config.sshMethod;
+        _sshServerCtrl.text = config.server;
+        _sshPortCtrl.text = config.port.toString();
+        if (config.isAccountLocked) {
+          _sshUserCtrl.text = config.username;
+          _sshPassCtrl.text = config.password;
+        }
+        _sshSniCtrl.text = config.sni;
+        _sshProxyCtrl.text = config.remoteProxy;
+        _sshPayloadCtrl.text = config.payload;
+      }
+    });
+
+    _addLog("Config Loaded: '${config.name}' (${config.mode.toUpperCase()})");
+    if (config.note.isNotEmpty) {
+      _addLog("Creator Note: ${config.note}");
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          title: Text(config.name, style: const TextStyle(color: AppColors.primaryLight, fontSize: 14, fontWeight: FontWeight.bold)),
+          content: Text(config.note, style: const TextStyle(color: AppColors.textPrimary, fontSize: 13)),
+          actions: [
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx),
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+              child: const Text("OK"),
+            )
+          ],
+        ),
+      );
+    }
   }
 
   void _toggleConnection() async {
     if (_vpnState == VpnState.connected ||
         _vpnState == VpnState.connecting ||
         _vpnState == VpnState.authenticating) {
+      _addLog("User requested DISCONNECT.");
       await VpnService.stopVpn();
       return;
     }
 
-    await _saveAccounts();
+    await _savePreferences();
 
     String configJson = "";
-    if (_modeTabController.index == 0) {
-      // Simple Mode
-      if (_selectedTemplate == null) {
-        _showSnackbar("Pilih template konfigurasi terlebih dahulu!");
-        return;
-      }
-      if (_simpleUserCtrl.text.isEmpty && _selectedTemplate!.protocol.contains("ssh")) {
-        _showSnackbar("Username tidak boleh kosong!");
+    final currentTab = _tabController.index;
+
+    try {
+      if (currentTab == 0) {
+        // SSH Custom Mode
+        if (_sshServerCtrl.text.trim().isEmpty) {
+          _showError("Host Server SSH tidak boleh kosong!");
+          return;
+        }
+        _addLog("Building SSH Config (Method: $_sshMethod, Host: ${_sshServerCtrl.text.trim()})...");
+        configJson = ConfigBuilder.buildSsh(
+          method: _sshMethod,
+          server: _sshServerCtrl.text.trim(),
+          port: int.tryParse(_sshPortCtrl.text.trim()) ?? 443,
+          username: _sshUserCtrl.text.trim(),
+          password: _sshPassCtrl.text.trim(),
+          sni: _sshSniCtrl.text.trim(),
+          payload: _sshPayloadCtrl.text.trim(),
+          remoteProxy: _sshProxyCtrl.text.trim(),
+        );
+      } else if (currentTab == 1) {
+        // V2Ray / Xray Mode
+        if (_v2rayServerCtrl.text.trim().isEmpty) {
+          _showError("Host Server V2Ray tidak boleh kosong!");
+          return;
+        }
+        _addLog("Building V2Ray Config ($_v2rayProtocol, Host: ${_v2rayServerCtrl.text.trim()})...");
+        configJson = ConfigBuilder.buildV2Ray(
+          protocol: _v2rayProtocol,
+          server: _v2rayServerCtrl.text.trim(),
+          port: int.tryParse(_v2rayPortCtrl.text.trim()) ?? 443,
+          uuid: _v2rayUuidCtrl.text.trim(),
+          transport: _v2rayTransport,
+          path: _v2rayPathCtrl.text.trim(),
+          sni: _v2raySniCtrl.text.trim(),
+          security: _v2rayTls,
+        );
+      } else if (currentTab == 2) {
+        // Cloud Tricks Mode (User's own server + cloud trick payload)
+        if (_selectedTemplate == null) {
+          _showError("Pilih salah satu template trik kuota!");
+          return;
+        }
+        if (_memberServerCtrl.text.trim().isEmpty) {
+          _showError("Masukkan alamat server SSH milik Anda!");
+          return;
+        }
+        _addLog("Applying Trick '${_selectedTemplate!.name}' with server '${_memberServerCtrl.text.trim()}'...");
+        configJson = ConfigBuilder.buildFromTemplate(
+          template: _selectedTemplate!,
+          memberServer: _memberServerCtrl.text.trim(),
+          memberPort: int.tryParse(_memberPortCtrl.text.trim()) ?? 443,
+          username: _memberUserCtrl.text.trim(),
+          password: _memberPassCtrl.text.trim(),
+        );
+      } else {
+        // If on Log tab, use last configured or SSH
+        _tabController.animateTo(0);
         return;
       }
 
-      configJson = ConfigBuilder.buildFromTemplate(
-        template: _selectedTemplate!,
-        username: _simpleUserCtrl.text.trim(),
-        password: _simplePassCtrl.text.trim(),
-      );
-    } else {
-      // Custom Mode
-      if (_customServerCtrl.text.isEmpty) {
-        _showSnackbar("Host server tidak boleh kosong!");
-        return;
+      _addLog("Passing configuration to sing-box Core...");
+      final success = await VpnService.startVpn(configJson);
+      if (!success) {
+        _addLog("VpnService: Initialization failed.");
+        _showError("Gagal memulai VPN. Periksa parameter server!");
       }
-
-      configJson = ConfigBuilder.buildCustom(
-        protocol: _customProtocol,
-        server: _customServerCtrl.text.trim(),
-        port: int.tryParse(_customPortCtrl.text.trim()) ?? 80,
-        username: _customUserCtrl.text.trim(),
-        password: _customPassCtrl.text.trim(),
-        sni: _customSniCtrl.text.trim(),
-        payload: _customPayloadCtrl.text.trim(),
-      );
-    }
-
-    final success = await VpnService.startVpn(configJson);
-    if (!success) {
-      _showSnackbar("Gagal memulai koneksi VPN. Periksa config & server.");
+    } catch (e) {
+      _addLog("Config Error: $e");
+      _showError("Error membangun konfigurasi: $e");
     }
   }
 
-  void _showSnackbar(String msg) {
+  void _showError(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(msg),
-        backgroundColor: AppColors.error,
-        behavior: SnackBarBehavior.floating,
-      ),
+      SnackBar(content: Text(msg), backgroundColor: AppColors.error),
     );
   }
 
@@ -222,99 +400,139 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
+      appBar: _buildTopBar(),
       body: SafeArea(
         child: Column(
           children: [
-            _buildAppBar(),
+            if (_loadedConfig != null) _buildLoadedConfigBanner(),
             _buildAnnouncementBanner(),
-            _buildModeTabs(),
+            _buildTabBar(),
             Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                child: Column(
-                  children: [
-                    _modeTabController.index == 0
-                        ? _buildSimpleModeCard()
-                        : _buildCustomModeCard(),
-                    const SizedBox(height: 20),
-                    _buildConnectionSection(),
-                    const SizedBox(height: 20),
-                    _buildStatsRow(),
-                    const SizedBox(height: 16),
-                  ],
-                ),
+              child: TabBarView(
+                controller: _tabController,
+                children: [
+                  _buildSshCustomTab(),
+                  _buildV2RayTab(),
+                  _buildCloudTricksTab(),
+                  _buildLogTab(),
+                ],
               ),
             ),
+            _buildBottomControlPanel(),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildAppBar() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: const BoxDecoration(
-        color: AppColors.surface,
-        border: Border(bottom: BorderSide(color: AppColors.border)),
+  PreferredSizeWidget _buildTopBar() {
+    return AppBar(
+      backgroundColor: AppColors.primary,
+      elevation: 0,
+      title: const Text(
+        "IZZ TUNNELING",
+        style: TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.bold,
+          letterSpacing: 1.0,
+          color: Colors.white,
+        ),
       ),
+      actions: [
+        // File Icon (Open / Save Config)
+        PopupMenuButton<String>(
+          icon: const Icon(Icons.folder_open_rounded, color: Colors.white),
+          tooltip: "Config Manager",
+          color: AppColors.surface,
+          onSelected: (val) {
+            if (val == "open") {
+              ConfigDialogs.showOpenConfigDialog(
+                context: context,
+                onConfigLoaded: _applyLoadedConfig,
+              );
+            } else if (val == "save") {
+              final isV2Ray = _tabController.index == 1;
+              ConfigDialogs.showSaveConfigDialog(
+                context: context,
+                mode: isV2Ray ? "v2ray" : "ssh",
+                sshMethod: _sshMethod,
+                server: isV2Ray ? _v2rayServerCtrl.text : _sshServerCtrl.text,
+                port: int.tryParse(isV2Ray ? _v2rayPortCtrl.text : _sshPortCtrl.text) ?? 443,
+                username: _sshUserCtrl.text,
+                password: _sshPassCtrl.text,
+                sni: isV2Ray ? _v2raySniCtrl.text : _sshSniCtrl.text,
+                payload: _sshPayloadCtrl.text,
+                remoteProxy: _sshProxyCtrl.text,
+                v2rayProtocol: _v2rayProtocol,
+                v2rayUuid: _v2rayUuidCtrl.text,
+                v2rayTransport: _v2rayTransport,
+                v2rayPath: _v2rayPathCtrl.text,
+                v2rayTls: _v2rayTls,
+                onSaved: () => setState(() {}),
+              );
+            } else if (val == "clear") {
+              setState(() {
+                _loadedConfig = null;
+                _sshServerCtrl.clear();
+                _sshPortCtrl.text = "443";
+                _sshUserCtrl.clear();
+                _sshPassCtrl.clear();
+                _sshSniCtrl.clear();
+                _sshProxyCtrl.clear();
+                _sshPayloadCtrl.clear();
+                _v2rayServerCtrl.clear();
+                _v2rayUuidCtrl.clear();
+              });
+              _addLog("Config cleared to default.");
+            }
+          },
+          itemBuilder: (ctx) => [
+            const PopupMenuItem(value: "open", child: Row(children: [Icon(Icons.folder_rounded, size: 18, color: AppColors.primaryLight), SizedBox(width: 10), Text("Open Config (.izz / .hc)", style: TextStyle(color: AppColors.textPrimary, fontSize: 13))])),
+            const PopupMenuItem(value: "save", child: Row(children: [Icon(Icons.save_rounded, size: 18, color: AppColors.primaryLight), SizedBox(width: 10), Text("Save Config", style: TextStyle(color: AppColors.textPrimary, fontSize: 13))])),
+            const PopupMenuItem(value: "clear", child: Row(children: [Icon(Icons.clear_all_rounded, size: 18, color: AppColors.error), SizedBox(width: 10), Text("Clear / Reset", style: TextStyle(color: AppColors.textPrimary, fontSize: 13))])),
+          ],
+        ),
+        // Tools Icon
+        IconButton(
+          icon: const Icon(Icons.build_outlined, color: Colors.white),
+          tooltip: "Tools (Response Check, DNS, IP)",
+          onPressed: () {
+            Navigator.push(context, MaterialPageRoute(builder: (_) => const ToolsScreen()));
+          },
+        ),
+        // Sync Cloud Icon
+        IconButton(
+          icon: _isLoadingTemplates
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : const Icon(Icons.sync_rounded, color: Colors.white),
+          tooltip: "Sync Cloud Tricks",
+          onPressed: _isLoadingTemplates ? null : _fetchCloudTemplates,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLoadedConfigBanner() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      color: AppColors.surfaceHighlight,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Row(
             children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  gradient: AppColors.primaryGradient,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(
-                  Icons.shield_rounded,
-                  color: Colors.white,
-                  size: 22,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    "✦ IZZ TUNNELING ✦",
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.2,
-                      color: AppColors.cyan,
-                    ),
-                  ),
-                  Text(
-                    _cloudConfig != null
-                        ? "v${_cloudConfig!.appVersion} • Cloud Active"
-                        : "Cloud Injector Suite",
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                ],
+              const Icon(Icons.lock_rounded, size: 14, color: AppColors.warning),
+              const SizedBox(width: 6),
+              Text(
+                "Config: ${_loadedConfig!.name} ${_loadedConfig!.isLocked ? '(Terkunci)' : ''}",
+                style: const TextStyle(fontSize: 11, color: AppColors.textPrimary, fontWeight: FontWeight.bold),
               ),
             ],
           ),
-          Row(
-            children: [
-              IconButton(
-                onPressed: _isLoadingTemplates ? null : _fetchCloudTemplates,
-                icon: _isLoadingTemplates
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.cyan),
-                      )
-                    : const Icon(Icons.sync_rounded, color: AppColors.cyan),
-                tooltip: "Sync Cloud Config",
-              ),
-            ],
+          InkWell(
+            onTap: () => setState(() => _loadedConfig = null),
+            child: const Text("UNLOAD", style: TextStyle(fontSize: 10, color: AppColors.error, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -326,38 +544,18 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     if (ann == null || ann.message.isEmpty) return const SizedBox.shrink();
 
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: AppColors.warning.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.warning.withOpacity(0.4)),
-      ),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      color: AppColors.surfaceLight,
       child: Row(
         children: [
-          const Icon(Icons.campaign_rounded, color: AppColors.warning, size: 22),
-          const SizedBox(width: 10),
+          const Icon(Icons.campaign_outlined, color: AppColors.warning, size: 16),
+          const SizedBox(width: 8),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (ann.title.isNotEmpty)
-                  Text(
-                    ann.title,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.warning,
-                    ),
-                  ),
-                Text(
-                  ann.message,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
-              ],
+            child: Text(
+              ann.message,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 11, color: AppColors.textPrimary),
             ),
           ),
         ],
@@ -365,279 +563,81 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
-  Widget _buildModeTabs() {
+  Widget _buildTabBar() {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border),
-      ),
+      color: AppColors.surface,
       child: TabBar(
-        controller: _modeTabController,
-        onTap: (index) => setState(() {}),
-        indicator: BoxDecoration(
-          gradient: AppColors.primaryGradient,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        indicatorSize: TabBarIndicatorSize.tab,
-        dividerColor: Colors.transparent,
-        labelColor: Colors.black,
+        controller: _tabController,
+        isScrollable: false,
+        indicatorColor: AppColors.primaryLight,
+        indicatorWeight: 3,
+        labelColor: AppColors.primaryLight,
         unselectedLabelColor: AppColors.textSecondary,
-        labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+        labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
         tabs: const [
-          Tab(
-            icon: Icon(Icons.cloud_download_rounded, size: 18),
-            text: "Simple (Cloud)",
-          ),
-          Tab(
-            icon: Icon(Icons.tune_rounded, size: 18),
-            text: "Custom (Injector)",
-          ),
+          Tab(text: "SSH INJECT"),
+          Tab(text: "V2RAY/XRAY"),
+          Tab(text: "CLOUD TRICKS"),
+          Tab(text: "LOG"),
         ],
       ),
     );
   }
 
-  Widget _buildSimpleModeCard() {
-    final templates = _cloudConfig?.templates ?? [];
-    final categories = ["All", ...?_cloudConfig?.categories];
+  // TAB 1: SSH Custom / Manual Injector
+  Widget _buildSshCustomTab() {
+    final isLocked = _loadedConfig?.isLocked == true;
+    final isAccountLocked = _loadedConfig?.isAccountLocked == true;
 
-    final filteredTemplates = _selectedCategory == "All"
-        ? templates
-        : templates.where((t) => t.category == _selectedCategory).toList();
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.border),
-      ),
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            "Pilih Template Config",
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.bold,
-              color: AppColors.textPrimary,
-            ),
-          ),
-          const SizedBox(height: 10),
-          // Category Chips
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: categories.map((cat) {
-                final isSel = _selectedCategory == cat;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: FilterChip(
-                    selected: isSel,
-                    label: Text(cat),
-                    labelStyle: TextStyle(
-                      fontSize: 11,
-                      fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
-                      color: isSel ? Colors.black : AppColors.textSecondary,
-                    ),
-                    backgroundColor: AppColors.surfaceLight,
-                    selectedColor: AppColors.cyan,
-                    side: BorderSide(
-                      color: isSel ? AppColors.cyan : AppColors.border,
-                    ),
-                    onSelected: (val) {
-                      setState(() {
-                        _selectedCategory = cat;
-                        if (filteredTemplates.isNotEmpty) {
-                          _selectedTemplate = filteredTemplates.first;
-                        }
-                      });
-                    },
-                  ),
-                );
-              }).toList(),
-            ),
-          ),
-          const SizedBox(height: 14),
-          // Template Selector
+          // SSH Tunnel Method Dropdown
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14),
+            padding: const EdgeInsets.symmetric(horizontal: 10),
             decoration: BoxDecoration(
               color: AppColors.surfaceLight,
-              borderRadius: BorderRadius.circular(14),
               border: Border.all(color: AppColors.border),
             ),
             child: DropdownButtonHideUnderline(
-              child: DropdownButton<TemplateModel>(
-                value: filteredTemplates.contains(_selectedTemplate)
-                    ? _selectedTemplate
-                    : (filteredTemplates.isNotEmpty ? filteredTemplates.first : null),
+              child: DropdownButton<String>(
+                value: _sshMethod,
                 isExpanded: true,
                 dropdownColor: AppColors.surface,
-                icon: const Icon(Icons.keyboard_arrow_down_rounded, color: AppColors.cyan),
-                items: filteredTemplates.map((t) {
-                  return DropdownMenuItem<TemplateModel>(
-                    value: t,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Flexible(
-                          child: Text(
-                            t.name,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: AppColors.textPrimary,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: AppColors.border,
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            t.protocol.toUpperCase(),
-                            style: const TextStyle(fontSize: 10, color: AppColors.cyan),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }).toList(),
-                onChanged: (val) {
-                  setState(() => _selectedTemplate = val);
-                },
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          // User Credentials
-          TextField(
-            controller: _simpleUserCtrl,
-            style: const TextStyle(color: AppColors.textPrimary, fontSize: 13),
-            decoration: InputDecoration(
-              labelText: "Username Akun",
-              labelStyle: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
-              prefixIcon: const Icon(Icons.person_outline_rounded, color: AppColors.cyan, size: 20),
-              filled: true,
-              fillColor: AppColors.surfaceLight,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(color: AppColors.border),
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _simplePassCtrl,
-            obscureText: _obscurePass,
-            style: const TextStyle(color: AppColors.textPrimary, fontSize: 13),
-            decoration: InputDecoration(
-              labelText: "Password / UUID",
-              labelStyle: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
-              prefixIcon: const Icon(Icons.lock_outline_rounded, color: AppColors.cyan, size: 20),
-              suffixIcon: IconButton(
-                icon: Icon(
-                  _obscurePass ? Icons.visibility_off : Icons.visibility,
-                  color: AppColors.textMuted,
-                  size: 18,
-                ),
-                onPressed: () => setState(() => _obscurePass = !_obscurePass),
-              ),
-              filled: true,
-              fillColor: AppColors.surfaceLight,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(color: AppColors.border),
+                style: const TextStyle(color: AppColors.primaryLight, fontWeight: FontWeight.bold, fontSize: 12),
+                items: const [
+                  DropdownMenuItem(value: "ws_ssl", child: Text("SSH + SSL / WebSocket (Port 443 + SNI)")),
+                  DropdownMenuItem(value: "ws_direct", child: Text("SSH + WebSocket Direct (Port 80 CDN)")),
+                  DropdownMenuItem(value: "ssl_payload", child: Text("SSH + SSL + HTTP Payload (Stunnel WS)")),
+                  DropdownMenuItem(value: "ssl_direct", child: Text("SSH + SSL/TLS Direct (Stunnel 443)")),
+                  DropdownMenuItem(value: "http_proxy", child: Text("SSH + HTTP Proxy (Squid Remote)")),
+                  DropdownMenuItem(value: "direct", child: Text("SSH Direct (Port 22/143)")),
+                ],
+                onChanged: isLocked ? null : (v) => setState(() => _sshMethod = v ?? "ws_ssl"),
               ),
             ),
           ),
           const SizedBox(height: 10),
-          Row(
-            children: [
-              Checkbox(
-                value: _rememberMe,
-                activeColor: AppColors.cyan,
-                checkColor: Colors.black,
-                onChanged: (v) => setState(() => _rememberMe = v ?? true),
-              ),
-              const Text(
-                "Ingat akun di perangkat ini",
-                style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCustomModeCard() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            "Konfigurasi Manual (Injector Mode)",
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.bold,
-              color: AppColors.textPrimary,
-            ),
-          ),
-          const SizedBox(height: 12),
-          // Protocol Selector
-          Row(
-            children: [
-              Expanded(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceLight,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppColors.border),
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      value: _customProtocol,
-                      dropdownColor: AppColors.surface,
-                      items: const [
-                        DropdownMenuItem(value: "ssh-ws", child: Text("SSH WebSocket")),
-                        DropdownMenuItem(value: "vmess-ws", child: Text("VMess WS")),
-                        DropdownMenuItem(value: "vless-ws", child: Text("VLess WS")),
-                        DropdownMenuItem(value: "trojan-ws", child: Text("Trojan WS")),
-                      ],
-                      onChanged: (v) => setState(() => _customProtocol = v ?? "ssh-ws"),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
+          // Server & Port
           Row(
             children: [
               Expanded(
                 flex: 3,
                 child: TextField(
-                  controller: _customServerCtrl,
-                  style: const TextStyle(fontSize: 12, color: AppColors.textPrimary),
-                  decoration: InputDecoration(
-                    labelText: "Server Host",
+                  controller: _sshServerCtrl,
+                  enabled: !isAccountLocked,
+                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+                  decoration: const InputDecoration(
+                    labelText: "SSH Server / Host",
+                    hintText: "host.com",
+                    labelStyle: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                    hintStyle: TextStyle(color: AppColors.textMuted, fontSize: 11),
                     filled: true,
                     fillColor: AppColors.surfaceLight,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    isDense: true,
+                    border: OutlineInputBorder(borderSide: BorderSide(color: AppColors.border)),
                   ),
                 ),
               ),
@@ -645,59 +645,326 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               Expanded(
                 flex: 1,
                 child: TextField(
-                  controller: _customPortCtrl,
+                  controller: _sshPortCtrl,
                   keyboardType: TextInputType.number,
-                  style: const TextStyle(fontSize: 12, color: AppColors.textPrimary),
-                  decoration: InputDecoration(
+                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+                  decoration: const InputDecoration(
                     labelText: "Port",
+                    hintText: "443",
+                    labelStyle: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                    hintStyle: TextStyle(color: AppColors.textMuted, fontSize: 11),
                     filled: true,
                     fillColor: AppColors.surfaceLight,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    isDense: true,
+                    border: OutlineInputBorder(borderSide: BorderSide(color: AppColors.border)),
                   ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _customSniCtrl,
-            style: const TextStyle(fontSize: 12, color: AppColors.textPrimary),
-            decoration: InputDecoration(
-              labelText: "Bug SNI / Server Name",
-              hintText: "Contoh: zoom.us / line.me",
-              filled: true,
-              fillColor: AppColors.surfaceLight,
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-          ),
-          const SizedBox(height: 12),
-          PayloadBox(controller: _customPayloadCtrl),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
+          // Username & Password
           Row(
             children: [
               Expanded(
                 child: TextField(
-                  controller: _customUserCtrl,
-                  style: const TextStyle(fontSize: 12, color: AppColors.textPrimary),
-                  decoration: InputDecoration(
+                  controller: _sshUserCtrl,
+                  enabled: !isAccountLocked,
+                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+                  decoration: const InputDecoration(
                     labelText: "Username",
+                    hintText: "username",
+                    labelStyle: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                    hintStyle: TextStyle(color: AppColors.textMuted, fontSize: 11),
                     filled: true,
                     fillColor: AppColors.surfaceLight,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    isDense: true,
+                    border: OutlineInputBorder(borderSide: BorderSide(color: AppColors.border)),
                   ),
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
                 child: TextField(
-                  controller: _customPassCtrl,
-                  obscureText: true,
-                  style: const TextStyle(fontSize: 12, color: AppColors.textPrimary),
+                  controller: _sshPassCtrl,
+                  obscureText: _obscureSshPass,
+                  enabled: !isAccountLocked,
+                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
                   decoration: InputDecoration(
                     labelText: "Password",
+                    hintText: "password",
+                    labelStyle: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                    hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 11),
                     filled: true,
                     fillColor: AppColors.surfaceLight,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    isDense: true,
+                    suffixIcon: IconButton(
+                      icon: Icon(_obscureSshPass ? Icons.visibility_off : Icons.visibility, size: 16, color: AppColors.textMuted),
+                      onPressed: () => setState(() => _obscureSshPass = !_obscureSshPass),
+                    ),
+                    border: const OutlineInputBorder(borderSide: BorderSide(color: AppColors.border)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          // SNI / Bug Host (if SSL / WebSocket)
+          if (_sshMethod.contains("ssl") || _sshMethod.contains("ws")) ...[
+            TextField(
+              controller: _sshSniCtrl,
+              enabled: !isLocked,
+              style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+              decoration: InputDecoration(
+                labelText: "Server Name Indication (SNI / Bug Host)",
+                hintText: isLocked ? "[DIKUNCI OLEH PEMBUAT]" : "host.com",
+                labelStyle: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+                filled: true,
+                fillColor: AppColors.surfaceLight,
+                isDense: true,
+                border: const OutlineInputBorder(borderSide: BorderSide(color: AppColors.border)),
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
+          // Remote Proxy (if HTTP Proxy)
+          if (_sshMethod == "http_proxy") ...[
+            TextField(
+              controller: _sshProxyCtrl,
+              enabled: !isLocked,
+              style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+              decoration: const InputDecoration(
+                labelText: "Remote HTTP Proxy (IP:Port)",
+                hintText: "1.2.3.4:8080",
+                labelStyle: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                filled: true,
+                fillColor: AppColors.surfaceLight,
+                isDense: true,
+                border: OutlineInputBorder(borderSide: BorderSide(color: AppColors.border)),
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
+          // Payload Generator Box
+          PayloadBox(
+            controller: _sshPayloadCtrl,
+            isLocked: isLocked,
+          ),
+        ],
+      ),
+    );
+  }
+
+  // TAB 2: V2Ray / Xray Configuration
+  Widget _buildV2RayTab() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Paste Link Bar
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _v2rayLinkCtrl,
+                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+                  decoration: const InputDecoration(
+                    hintText: "Tempel link vmess://, vless://, trojan://...",
+                    hintStyle: TextStyle(color: AppColors.textMuted, fontSize: 11),
+                    filled: true,
+                    fillColor: AppColors.surfaceLight,
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                    border: OutlineInputBorder(borderSide: BorderSide(color: AppColors.border)),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                onPressed: () async {
+                  final data = await Clipboard.getData('text/plain');
+                  if (data != null && data.text != null) {
+                    _v2rayLinkCtrl.text = data.text!;
+                    _parsePastedV2RayLink();
+                  }
+                },
+                icon: const Icon(Icons.paste_rounded, size: 16),
+                label: const Text("PARSE", style: TextStyle(fontSize: 11)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Protocol Selector
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceLight,
+              border: Border.all(color: AppColors.border),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: _v2rayProtocol,
+                isExpanded: true,
+                dropdownColor: AppColors.surface,
+                style: const TextStyle(color: AppColors.primaryLight, fontWeight: FontWeight.bold, fontSize: 12),
+                items: const [
+                  DropdownMenuItem(value: "vmess", child: Text("VMess Protocol")),
+                  DropdownMenuItem(value: "vless", child: Text("VLess Protocol")),
+                  DropdownMenuItem(value: "trojan", child: Text("Trojan Protocol")),
+                  DropdownMenuItem(value: "shadowsocks", child: Text("Shadowsocks Protocol")),
+                ],
+                onChanged: (v) => setState(() => _v2rayProtocol = v ?? "vmess"),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          // Server & Port
+          Row(
+            children: [
+              Expanded(
+                flex: 3,
+                child: TextField(
+                  controller: _v2rayServerCtrl,
+                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+                  decoration: const InputDecoration(
+                    labelText: "Server / Address",
+                    hintText: "host.com",
+                    labelStyle: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                    filled: true,
+                    fillColor: AppColors.surfaceLight,
+                    isDense: true,
+                    border: OutlineInputBorder(borderSide: BorderSide(color: AppColors.border)),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 1,
+                child: TextField(
+                  controller: _v2rayPortCtrl,
+                  keyboardType: TextInputType.number,
+                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+                  decoration: const InputDecoration(
+                    labelText: "Port",
+                    hintText: "443",
+                    labelStyle: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                    filled: true,
+                    fillColor: AppColors.surfaceLight,
+                    isDense: true,
+                    border: OutlineInputBorder(borderSide: BorderSide(color: AppColors.border)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          // UUID / Password
+          TextField(
+            controller: _v2rayUuidCtrl,
+            style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+            decoration: const InputDecoration(
+              labelText: "UUID / Password / Key",
+              hintText: "00000000-0000-0000-0000-000000000000",
+              labelStyle: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+              filled: true,
+              fillColor: AppColors.surfaceLight,
+              isDense: true,
+              border: OutlineInputBorder(borderSide: BorderSide(color: AppColors.border)),
+            ),
+          ),
+          const SizedBox(height: 10),
+          // Transport & Path
+          Row(
+            children: [
+              Expanded(
+                flex: 1,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceLight,
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: _v2rayTransport,
+                      dropdownColor: AppColors.surface,
+                      style: const TextStyle(color: AppColors.cyan, fontWeight: FontWeight.bold, fontSize: 12),
+                      items: const [
+                        DropdownMenuItem(value: "ws", child: Text("WS (WebSocket)")),
+                        DropdownMenuItem(value: "grpc", child: Text("gRPC")),
+                        DropdownMenuItem(value: "tcp", child: Text("TCP")),
+                      ],
+                      onChanged: (v) => setState(() => _v2rayTransport = v ?? "ws"),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 2,
+                child: TextField(
+                  controller: _v2rayPathCtrl,
+                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+                  decoration: const InputDecoration(
+                    labelText: "Path / Service Name",
+                    hintText: "/path",
+                    labelStyle: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                    filled: true,
+                    fillColor: AppColors.surfaceLight,
+                    isDense: true,
+                    border: OutlineInputBorder(borderSide: BorderSide(color: AppColors.border)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          // SNI & TLS
+          Row(
+            children: [
+              Expanded(
+                flex: 2,
+                child: TextField(
+                  controller: _v2raySniCtrl,
+                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+                  decoration: const InputDecoration(
+                    labelText: "SNI / Host Header",
+                    hintText: "host.com",
+                    labelStyle: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                    filled: true,
+                    fillColor: AppColors.surfaceLight,
+                    isDense: true,
+                    border: OutlineInputBorder(borderSide: BorderSide(color: AppColors.border)),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 1,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceLight,
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: _v2rayTls,
+                      dropdownColor: AppColors.surface,
+                      style: const TextStyle(color: AppColors.warning, fontWeight: FontWeight.bold, fontSize: 12),
+                      items: const [
+                        DropdownMenuItem(value: "tls", child: Text("TLS")),
+                        DropdownMenuItem(value: "none", child: Text("None")),
+                      ],
+                      onChanged: (v) => setState(() => _v2rayTls = v ?? "tls"),
+                    ),
                   ),
                 ),
               ),
@@ -708,104 +975,287 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
-  Widget _buildConnectionSection() {
-    String stateLabel = "DISCONNECTED";
-    Color stateColor = AppColors.error;
+  // TAB 3: Cloud Tricks (Member enters their own server)
+  Widget _buildCloudTricksTab() {
+    final templates = _cloudConfig?.templates ?? [];
+    final categories = ["All", ...?_cloudConfig?.categories];
 
-    switch (_vpnState) {
-      case VpnState.connecting:
-        stateLabel = "CONNECTING...";
-        stateColor = AppColors.warning;
-        break;
-      case VpnState.authenticating:
-        stateLabel = "AUTHENTICATING...";
-        stateColor = AppColors.cyan;
-        break;
-      case VpnState.connected:
-        stateLabel = "CONNECTED";
-        stateColor = AppColors.success;
-        break;
-      case VpnState.error:
-        stateLabel = "CONNECTION FAILED";
-        stateColor = AppColors.error;
-        break;
-      default:
-        stateLabel = "TAP TO CONNECT";
-        stateColor = AppColors.textSecondary;
-        break;
-    }
+    final filtered = _selectedCategory == "All"
+        ? templates
+        : templates.where((t) => t.category == _selectedCategory).toList();
 
-    return Column(
-      children: [
-        ConnectionButton(
-          state: _vpnState,
-          onTap: _toggleConnection,
-        ),
-        const SizedBox(height: 16),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-          decoration: BoxDecoration(
-            color: stateColor.withOpacity(0.12),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: stateColor.withOpacity(0.4)),
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text("1. PILIH TRIK KUOTA / OPERATOR", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.primaryLight)),
+          const SizedBox(height: 8),
+          // Category Pills
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: categories.map((cat) {
+                final isSel = _selectedCategory == cat;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: InkWell(
+                    onTap: () {
+                      setState(() {
+                        _selectedCategory = cat;
+                        if (filtered.isNotEmpty) _selectedTemplate = filtered.first;
+                      });
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: isSel ? AppColors.primary : AppColors.surfaceLight,
+                        border: Border.all(color: isSel ? AppColors.primaryLight : AppColors.border),
+                      ),
+                      child: Text(
+                        cat,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
+                          color: isSel ? Colors.white : AppColors.textSecondary,
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
           ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
+          const SizedBox(height: 10),
+          // Template Selector
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceLight,
+              border: Border.all(color: AppColors.border),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<TemplateModel>(
+                value: filtered.contains(_selectedTemplate) ? _selectedTemplate : (filtered.isNotEmpty ? filtered.first : null),
+                isExpanded: true,
+                dropdownColor: AppColors.surface,
+                items: filtered.map((t) {
+                  return DropdownMenuItem(
+                    value: t,
+                    child: Text("${t.name} (${t.protocol.toUpperCase()})", style: const TextStyle(fontSize: 12, color: AppColors.textPrimary)),
+                  );
+                }).toList(),
+                onChanged: (v) => setState(() => _selectedTemplate = v),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text("2. MASUKKAN SERVER & AKUN ANDA SENDIRI", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.primaryLight)),
+          const SizedBox(height: 8),
+          Row(
             children: [
-              Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: stateColor,
+              Expanded(
+                flex: 3,
+                child: TextField(
+                  controller: _memberServerCtrl,
+                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+                  decoration: const InputDecoration(
+                    labelText: "Server VPS Anda",
+                    hintText: "host.com",
+                    labelStyle: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                    filled: true,
+                    fillColor: AppColors.surfaceLight,
+                    isDense: true,
+                    border: OutlineInputBorder(borderSide: BorderSide(color: AppColors.border)),
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
-              Text(
-                stateLabel,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1.1,
-                  color: stateColor,
+              Expanded(
+                flex: 1,
+                child: TextField(
+                  controller: _memberPortCtrl,
+                  keyboardType: TextInputType.number,
+                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+                  decoration: const InputDecoration(
+                    labelText: "Port",
+                    hintText: "443",
+                    labelStyle: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                    filled: true,
+                    fillColor: AppColors.surfaceLight,
+                    isDense: true,
+                    border: OutlineInputBorder(borderSide: BorderSide(color: AppColors.border)),
+                  ),
                 ),
               ),
             ],
           ),
-        ),
-      ],
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _memberUserCtrl,
+                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+                  decoration: const InputDecoration(
+                    labelText: "Username Akun Anda",
+                    hintText: "username",
+                    labelStyle: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                    filled: true,
+                    fillColor: AppColors.surfaceLight,
+                    isDense: true,
+                    border: OutlineInputBorder(borderSide: BorderSide(color: AppColors.border)),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextField(
+                  controller: _memberPassCtrl,
+                  obscureText: true,
+                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+                  decoration: const InputDecoration(
+                    labelText: "Password Akun",
+                    hintText: "password",
+                    labelStyle: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                    filled: true,
+                    fillColor: AppColors.surfaceLight,
+                    isDense: true,
+                    border: OutlineInputBorder(borderSide: BorderSide(color: AppColors.border)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
-  Widget _buildStatsRow() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        StatBadge(
-          icon: Icons.speed_rounded,
-          label: "PING",
-          value: _ping,
-          color: AppColors.cyan,
-        ),
-        StatBadge(
-          icon: Icons.arrow_downward_rounded,
-          label: "DOWNLOAD",
-          value: _download,
-          color: AppColors.success,
-        ),
-        StatBadge(
-          icon: Icons.arrow_upward_rounded,
-          label: "UPLOAD",
-          value: _upload,
-          color: AppColors.blue,
-        ),
-        StatBadge(
-          icon: Icons.timer_outlined,
-          label: "DURATION",
-          value: _formatDuration(_connectedSeconds),
-          color: AppColors.violet,
-        ),
-      ],
+  // TAB 4: Live Terminal Console Log
+  Widget _buildLogTab() {
+    return Container(
+      color: AppColors.logBg,
+      padding: const EdgeInsets.all(10),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text("TERMINAL LOG OUTPUT", style: TextStyle(color: AppColors.logTime, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.0)),
+              Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.copy_rounded, color: AppColors.logTime, size: 16),
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: _logs.join("\n")));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text("Log disalin ke clipboard!"), backgroundColor: AppColors.primary),
+                      );
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.delete_sweep_rounded, color: AppColors.logTime, size: 16),
+                    onPressed: () => setState(() => _logs.clear()),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const Divider(color: AppColors.border, height: 1),
+          Expanded(
+            child: ListView.builder(
+              controller: _logScrollController,
+              itemCount: _logs.length,
+              itemBuilder: (context, idx) {
+                final line = _logs[idx];
+                Color lineColor = AppColors.logText;
+                if (line.contains("CONNECTED")) lineColor = AppColors.logGreen;
+                if (line.contains("ERROR")) lineColor = AppColors.logRed;
+                if (line.contains("Connecting") || line.contains("Handshaking")) lineColor = AppColors.logYellow;
+                if (line.contains("sing-box") || line.contains("Core")) lineColor = AppColors.logBlue;
+
+                return Text(
+                  line,
+                  style: TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 11,
+                    color: lineColor,
+                    height: 1.3,
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Bottom Control Panel: Classic HTTP Custom Connect Button & Stats
+  Widget _buildBottomControlPanel() {
+    final isConnected = _vpnState == VpnState.connected;
+    final isWorking = _vpnState == VpnState.connecting || _vpnState == VpnState.authenticating;
+
+    Color btnColor = AppColors.primaryLight;
+    String btnText = "CONNECT";
+    if (isConnected) {
+      btnColor = AppColors.connected;
+      btnText = "DISCONNECT";
+    } else if (isWorking) {
+      btnColor = AppColors.warning;
+      btnText = "CONNECTING...";
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: const BoxDecoration(
+        color: AppColors.surface,
+        border: Border(top: BorderSide(color: AppColors.border)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Stat Badges
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              StatBadge(icon: Icons.speed_rounded, label: "PING", value: _ping, color: AppColors.cyan),
+              StatBadge(icon: Icons.arrow_downward_rounded, label: "DOWN", value: _download, color: AppColors.success),
+              StatBadge(icon: Icons.arrow_upward_rounded, label: "UP", value: _upload, color: AppColors.info),
+              StatBadge(icon: Icons.timer_outlined, label: "TIME", value: _formatDuration(_connectedSeconds), color: AppColors.warning),
+            ],
+          ),
+          const SizedBox(height: 10),
+          // Big Utilitarian Solid Connect Button
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: ElevatedButton(
+              onPressed: _toggleConnection,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: btnColor,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                elevation: 0,
+              ),
+              child: isWorking
+                  ? const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+                        SizedBox(width: 10),
+                        Text("CONNECTING...", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: 1.0)),
+                      ],
+                    )
+                  : Text(
+                      btnText,
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: 1.0),
+                    ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

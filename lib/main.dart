@@ -1,10 +1,18 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter/services.dart';
 import 'constants/app_colors.dart';
 import 'screens/home_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(
+      statusBarColor: AppColors.primaryDark,
+      statusBarIconBrightness: Brightness.light,
+      systemNavigationBarColor: AppColors.surface,
+      systemNavigationBarIconBrightness: Brightness.light,
+    ),
+  );
   runApp(const IzzVpnApp());
 }
 
@@ -20,13 +28,16 @@ class IzzVpnApp extends StatelessWidget {
       darkTheme: ThemeData(
         brightness: Brightness.dark,
         scaffoldBackgroundColor: AppColors.background,
-        primaryColor: AppColors.cyan,
-        textTheme: GoogleFonts.poppinsTextTheme(
-          ThemeData.dark().textTheme,
+        primaryColor: AppColors.primary,
+        fontFamily: 'sans-serif',
+        appBarTheme: const AppBarTheme(
+          backgroundColor: AppColors.primary,
+          foregroundColor: Colors.white,
+          elevation: 0,
         ),
         colorScheme: const ColorScheme.dark(
-          primary: AppColors.cyan,
-          secondary: AppColors.blue,
+          primary: AppColors.primary,
+          secondary: AppColors.primaryLight,
           surface: AppColors.surface,
           background: AppColors.background,
         ),
