@@ -45,6 +45,18 @@ android {
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
         }
     }
+
+    sourceSets {
+        main {
+            jniLibs.srcDirs = ['src/main/jniLibs']
+        }
+    }
+
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
 }
 
 // Keep all architectures but compress better
@@ -56,4 +68,5 @@ flutter {
 dependencies {
     implementation "androidx.core:core-ktx:1.12.0"
     implementation "androidx.multidex:multidex:2.0.1"
+    implementation files("libs/hev-socks5-tunnel.aar")
 }

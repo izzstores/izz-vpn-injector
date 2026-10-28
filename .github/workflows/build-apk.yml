@@ -50,6 +50,27 @@ jobs:
       - name: Get Dependencies
         run: flutter pub get
 
+      - name: Download sing-box Core Binaries
+        run: |
+          mkdir -p android/app/src/main/jniLibs/arm64-v8a
+          mkdir -p android/app/src/main/jniLibs/armeabi-v7a
+          mkdir -p android/app/src/main/jniLibs/x86_64
+
+          echo "Downloading sing-box arm64..."
+          curl -s -L --retry 3 "https://github.com/SagerNet/sing-box/releases/download/v1.10.1/sing-box-1.10.1-android-arm64.tar.gz" | tar -xz -C /tmp/
+          mv /tmp/sing-box-1.10.1-android-arm64/sing-box android/app/src/main/jniLibs/arm64-v8a/libsing-box.so
+
+          echo "Downloading sing-box armv7..."
+          curl -s -L --retry 3 "https://github.com/SagerNet/sing-box/releases/download/v1.10.1/sing-box-1.10.1-android-armv7.tar.gz" | tar -xz -C /tmp/
+          mv /tmp/sing-box-1.10.1-android-armv7/sing-box android/app/src/main/jniLibs/armeabi-v7a/libsing-box.so
+
+          echo "Downloading sing-box amd64..."
+          curl -s -L --retry 3 "https://github.com/SagerNet/sing-box/releases/download/v1.10.1/sing-box-1.10.1-android-amd64.tar.gz" | tar -xz -C /tmp/
+          mv /tmp/sing-box-1.10.1-android-amd64/sing-box android/app/src/main/jniLibs/x86_64/libsing-box.so
+
+          chmod 755 android/app/src/main/jniLibs/*/libsing-box.so
+          ls -lh android/app/src/main/jniLibs/*/libsing-box.so
+
       - name: Build Android Release APK
         run: flutter build apk --release --obfuscate --split-debug-info=build/debug-info --tree-shake-icons
 
@@ -70,17 +91,18 @@ jobs:
           tag_name: ${{ steps.version.outputs.tag }}
           name: "Izz Tunnel ${{ steps.version.outputs.tag }}"
           body: |
-            ## Izz Tunnel ${{ steps.version.outputs.tag }}
+            ## Izz Tunnel ${{ steps.version.outputs.tag }} (Real Engine Edition)
             
-            Perbaikan:
-            - Koneksi SSH/V2Ray: Validasi server asli (TCP handshake) sebelum status CONNECTED.
-            - Server tidak valid / tidak aktif → langsung tampil ERROR, bukan fake connected.
-            - Health check berkala setiap 15 detik, auto-disconnect jika server mati.
-            - Tab "CLOUD TRICKS" diubah menjadi "TEMPLATE CONFIG".
-            - Label "Open Config (.izz/.hc)" diubah menjadi "Open Config".
-            - Bot admin: Langkah server/port dihapus dari flow tambah template.
-            - Template config hanya menyimpan SNI, payload, protokol — server diisi member di app.
-            - Error message dari VPN service ditampilkan di log dan SnackBar.
+            Pembaruan Besar & Fix Koneksi:
+            - Engine Tunneling Nyata: sing-box native core + hev-socks5-tunnel terintegrasi langsung di APK.
+            - Konfigurasi SSH Inject disamakan dengan Dark Tunnel:
+              * Checkbox SSL/TLS (SNI) + input SNI Bug Host
+              * Checkbox Payload + text area & tag shortcuts
+              * Checkbox Remote Proxy + input Proxy IP:Port
+              * Auto-set port cerdas (443 untuk SSL, 80 untuk Payload, 22 untuk Direct)
+            - Menghapus TCP handshake blocker yang menyebabkan koneksi gagal di kartu seluler.
+            - Kuota internet & aplikasi lain (WhatsApp, YouTube, Browser, Game) sekarang benar-benar ter-tunneling.
+            - Monitoring traffic up/down live dari engine tunnel.
           files: build/app/outputs/flutter-apk/app-release.apk
           draft: false
           prerelease: false

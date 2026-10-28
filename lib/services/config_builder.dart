@@ -16,28 +16,76 @@ class ConfigBuilder {
     final sni = template.sni ?? "";
     final payload = template.payload ?? "";
 
-    return buildSsh(
-      method: protocol.contains("ssl") || finalPort == 443 ? "ws_ssl" : "ws_direct",
-      server: finalServer,
-      port: finalPort,
-      username: username,
-      password: password,
-      sni: sni,
-      payload: payload,
-    );
+    if (protocol.contains("ssh")) {
+      final isSsl = protocol.contains("ssl") || finalPort == 443;
+      final isPayload = payload.isNotEmpty || protocol.contains("ws");
+      return buildSsh(
+        server: finalServer,
+        port: finalPort,
+        username: username,
+        password: password,
+        enableSsl: isSsl,
+        sni: sni,
+        enablePayload: isPayload,
+        payload: payload,
+      );
+    } else {
+      // V2Ray protocols (vmess, vless, trojan, shadowsocks)
+      final v2proto = protocol.replaceFirst("-ws", "").replaceFirst("-grpc", "");
+      final transport = protocol.contains("grpc") ? "grpc" : "ws";
+      final isTls = finalPort == 443 || sni.isNotEmpty;
+      return buildV2Ray(
+        protocol: v2proto,
+        server: finalServer,
+        port: finalPort,
+        uuid: username.isNotEmpty ? username : "00000000-0000-0000-0000-000000000000",
+        transport: transport,
+        path: payload.isNotEmpty ? payload : "/$v2proto-ws",
+        sni: sni,
+        security: isTls ? "tls" : "none",
+      );
+    }
   }
 
-  /// Builds sing-box config for any SSH method
+  /// Builds sing-box config for SSH Inject (Dark Tunnel style)
   static String buildSsh({
-    required String method, // 'direct', 'http_proxy', 'ssl_direct', 'ssl_payload', 'ws_direct', 'ws_ssl', 'slowdns'
     required String server,
     required int port,
     required String username,
     required String password,
+    bool enableSsl = true,
     String sni = "",
+    bool enablePayload = true,
     String payload = "",
+    bool enableProxy = false,
     String remoteProxy = "",
+    String? method, // legacy fallback
   }) {
+    // If legacy method string was passed, map it
+    if (method != null) {
+      if (method == "ws_ssl" || method == "ssl_payload") {
+        enableSsl = true;
+        enablePayload = true;
+        enableProxy = false;
+      } else if (method == "ssl_direct") {
+        enableSsl = true;
+        enablePayload = false;
+        enableProxy = false;
+      } else if (method == "ws_direct") {
+        enableSsl = false;
+        enablePayload = true;
+        enableProxy = false;
+      } else if (method == "http_proxy") {
+        enableSsl = false;
+        enablePayload = true;
+        enableProxy = true;
+      } else if (method == "direct") {
+        enableSsl = false;
+        enablePayload = false;
+        enableProxy = false;
+      }
+    }
+
     Map<String, dynamic> proxyOutbound = {
       "type": "ssh",
       "tag": "proxy-out",
@@ -47,7 +95,7 @@ class ConfigBuilder {
       "password": password,
     };
 
-    if (method == "ws_ssl" || method == "ssl_payload") {
+    if (enablePayload) {
       proxyOutbound["transport"] = {
         "type": "ws",
         "path": "/",
@@ -56,33 +104,22 @@ class ConfigBuilder {
           "Upgrade": "websocket",
         }
       };
+    }
+
+    if (enableSsl) {
       proxyOutbound["tls"] = {
         "enabled": true,
         "server_name": sni.isNotEmpty ? sni : server,
         "insecure": true,
       };
-    } else if (method == "ws_direct") {
-      proxyOutbound["transport"] = {
-        "type": "ws",
-        "path": "/",
-        "headers": {
-          "Host": sni.isNotEmpty ? sni : server,
-          "Upgrade": "websocket",
-        }
-      };
-    } else if (method == "ssl_direct") {
-      proxyOutbound["tls"] = {
-        "enabled": true,
-        "server_name": sni.isNotEmpty ? sni : server,
-        "insecure": true,
-      };
-    } else if (method == "http_proxy" && remoteProxy.isNotEmpty) {
+    }
+
+    if (enableProxy && remoteProxy.isNotEmpty) {
       final proxyParts = remoteProxy.split(":");
       final proxyHost = proxyParts[0];
       final proxyPort = proxyParts.length > 1 ? int.tryParse(proxyParts[1]) ?? 8080 : 8080;
 
       proxyOutbound["detour"] = "http-proxy-out";
-      // We also add an http proxy outbound
       return _wrapSingBox(
         outbounds: [
           proxyOutbound,
@@ -110,11 +147,11 @@ class ConfigBuilder {
     required String protocol, // 'vmess', 'vless', 'trojan', 'shadowsocks'
     required String server,
     required int port,
-    required String uuid, // or password
+    required String uuid,
     String transport = "ws", // 'ws', 'grpc', 'tcp'
     String path = "/vmess-ws",
     String sni = "",
-    String security = "tls", // 'none', 'tls', 'reality'
+    String security = "tls", // 'none', 'tls'
   }) {
     Map<String, dynamic> proxyOutbound = {
       "type": protocol.toLowerCase(),
@@ -180,13 +217,10 @@ class ConfigBuilder {
       },
       "inbounds": [
         {
-          "type": "tun",
-          "tag": "tun-in",
-          "interface_name": "izz-tun0",
-          "inet4_address": "172.19.0.1/30",
-          "auto_route": true,
-          "strict_route": true,
-          "stack": "system",
+          "type": "mixed",
+          "tag": "mixed-in",
+          "listen": "127.0.0.1",
+          "listen_port": 10808,
           "sniff": true,
         }
       ],

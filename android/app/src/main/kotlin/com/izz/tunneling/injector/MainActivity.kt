@@ -42,6 +42,14 @@ class MainActivity : FlutterActivity() {
                 }
             }
         }
+
+        fun notifyStats(stats: Map<String, Any>) {
+            mainHandler.post {
+                try {
+                    channel?.invokeMethod("onStats", stats)
+                } catch (_: Exception) {}
+            }
+        }
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {

@@ -11,6 +11,9 @@
 -keep class androidx.** { *; }
 -dontwarn androidx.**
 
+# Keep hev-socks5-tunnel
+-keep class hev.htproxy.** { *; }
+
 # Keep Kotlin metadata
 -keepclassmembers class * {
     @kotlin.Metadata *;

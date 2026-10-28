@@ -29,7 +29,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   SavedConfigModel? _loadedConfig;
 
   // 1. SSH Custom Mode State
-  String _sshMethod = "ws_ssl"; // 'direct', 'http_proxy', 'ssl_direct', 'ssl_payload', 'ws_direct', 'ws_ssl'
+  bool _enableSsl = true;
+  bool _enablePayload = true;
+  bool _enableProxy = false;
   final TextEditingController _sshServerCtrl = TextEditingController();
   final TextEditingController _sshPortCtrl = TextEditingController(text: "443");
   final TextEditingController _sshUserCtrl = TextEditingController();
@@ -193,6 +195,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     setState(() {
       _sshServerCtrl.text = prefs.getString("ssh_server") ?? "";
       _sshPortCtrl.text = prefs.getString("ssh_port") ?? "443";
+      _enableSsl = prefs.getBool("ssh_ssl") ?? true;
+      _enablePayload = prefs.getBool("ssh_payload_enable") ?? true;
+      _enableProxy = prefs.getBool("ssh_proxy_enable") ?? false;
       _sshUserCtrl.text = prefs.getString("ssh_user") ?? "";
       _sshPassCtrl.text = prefs.getString("ssh_pass") ?? "";
       _sshSniCtrl.text = prefs.getString("ssh_sni") ?? "";
@@ -209,6 +214,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString("ssh_server", _sshServerCtrl.text);
     await prefs.setString("ssh_port", _sshPortCtrl.text);
+    await prefs.setBool("ssh_ssl", _enableSsl);
+    await prefs.setBool("ssh_payload_enable", _enablePayload);
+    await prefs.setBool("ssh_proxy_enable", _enableProxy);
     await prefs.setString("ssh_user", _sshUserCtrl.text);
     await prefs.setString("ssh_pass", _sshPassCtrl.text);
     await prefs.setString("ssh_sni", _sshSniCtrl.text);
@@ -282,7 +290,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         _v2rayTls = config.v2rayTls;
       } else {
         _tabController.animateTo(0);
-        _sshMethod = config.sshMethod;
+        _enableSsl = config.sshMethod.contains("ssl") || config.port == 443;
+        _enablePayload = config.payload.isNotEmpty || config.sshMethod.contains("ws");
+        _enableProxy = config.remoteProxy.isNotEmpty || config.sshMethod == "http_proxy";
         _sshServerCtrl.text = config.server;
         _sshPortCtrl.text = config.port.toString();
         if (config.isAccountLocked) {
@@ -337,15 +347,22 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           _showError("Host Server SSH tidak boleh kosong!");
           return;
         }
-        _addLog("Building SSH Config (Method: $_sshMethod, Host: ${_sshServerCtrl.text.trim()})...");
+        final modeDesc = [
+          if (_enableSsl) "SSL",
+          if (_enablePayload) "Payload",
+          if (_enableProxy) "Proxy",
+        ].join(" + ");
+        _addLog("Building SSH Config (${modeDesc.isEmpty ? 'Direct' : modeDesc}, Host: ${_sshServerCtrl.text.trim()})...");
         configJson = ConfigBuilder.buildSsh(
-          method: _sshMethod,
           server: _sshServerCtrl.text.trim(),
           port: int.tryParse(_sshPortCtrl.text.trim()) ?? 443,
           username: _sshUserCtrl.text.trim(),
           password: _sshPassCtrl.text.trim(),
+          enableSsl: _enableSsl,
           sni: _sshSniCtrl.text.trim(),
+          enablePayload: _enablePayload,
           payload: _sshPayloadCtrl.text.trim(),
+          enableProxy: _enableProxy,
           remoteProxy: _sshProxyCtrl.text.trim(),
         );
       } else if (currentTab == 1) {
@@ -488,7 +505,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               ConfigDialogs.showSaveConfigDialog(
                 context: context,
                 mode: isV2Ray ? "v2ray" : "ssh",
-                sshMethod: _sshMethod,
+                sshMethod: _enableSsl && _enablePayload ? "ws_ssl" : (_enableSsl ? "ssl_direct" : (_enableProxy ? "http_proxy" : (_enablePayload ? "ws_direct" : "direct"))),
                 server: isV2Ray ? _v2rayServerCtrl.text : _sshServerCtrl.text,
                 port: int.tryParse(isV2Ray ? _v2rayPortCtrl.text : _sshPortCtrl.text) ?? 443,
                 username: _sshUserCtrl.text,
@@ -617,7 +634,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
-  // TAB 1: SSH Custom / Manual Injector
+  // TAB 1: SSH Custom / Manual Injector (Dark Tunnel Style)
   Widget _buildSshCustomTab() {
     final isLocked = _loadedConfig?.isLocked == true;
     final isAccountLocked = _loadedConfig?.isAccountLocked == true;
@@ -627,29 +644,57 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // SSH Tunnel Method Dropdown
+          // Dark Tunnel Style Method Checkboxes
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             decoration: BoxDecoration(
               color: AppColors.surfaceLight,
               border: Border.all(color: AppColors.border),
+              borderRadius: BorderRadius.circular(4),
             ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-                value: _sshMethod,
-                isExpanded: true,
-                dropdownColor: AppColors.surface,
-                style: const TextStyle(color: AppColors.primaryLight, fontWeight: FontWeight.bold, fontSize: 12),
-                items: const [
-                  DropdownMenuItem(value: "ws_ssl", child: Text("SSH + SSL / WebSocket (Port 443 + SNI)")),
-                  DropdownMenuItem(value: "ws_direct", child: Text("SSH + WebSocket Direct (Port 80 CDN)")),
-                  DropdownMenuItem(value: "ssl_payload", child: Text("SSH + SSL + HTTP Payload (Stunnel WS)")),
-                  DropdownMenuItem(value: "ssl_direct", child: Text("SSH + SSL/TLS Direct (Stunnel 443)")),
-                  DropdownMenuItem(value: "http_proxy", child: Text("SSH + HTTP Proxy (Squid Remote)")),
-                  DropdownMenuItem(value: "direct", child: Text("SSH Direct (Port 22/143)")),
-                ],
-                onChanged: isLocked ? null : (v) => setState(() => _sshMethod = v ?? "ws_ssl"),
-              ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildDarkTunnelCheckbox(
+                  title: "SSL / TLS",
+                  value: _enableSsl,
+                  onChanged: isLocked
+                      ? null
+                      : (v) {
+                          setState(() {
+                            _enableSsl = v ?? false;
+                            if (_enableSsl && (_sshPortCtrl.text == "22" || _sshPortCtrl.text == "80")) {
+                              _sshPortCtrl.text = "443";
+                            } else if (!_enableSsl && _enablePayload && _sshPortCtrl.text == "443") {
+                              _sshPortCtrl.text = "80";
+                            } else if (!_enableSsl && !_enablePayload && _sshPortCtrl.text == "443") {
+                              _sshPortCtrl.text = "22";
+                            }
+                          });
+                        },
+                ),
+                _buildDarkTunnelCheckbox(
+                  title: "Payload",
+                  value: _enablePayload,
+                  onChanged: isLocked
+                      ? null
+                      : (v) {
+                          setState(() {
+                            _enablePayload = v ?? false;
+                            if (_enablePayload && !_enableSsl && _sshPortCtrl.text == "22") {
+                              _sshPortCtrl.text = "80";
+                            }
+                          });
+                        },
+                ),
+                _buildDarkTunnelCheckbox(
+                  title: "Proxy",
+                  value: _enableProxy,
+                  onChanged: isLocked
+                      ? null
+                      : (v) => setState(() => _enableProxy = v ?? false),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 10),
@@ -742,8 +787,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             ],
           ),
           const SizedBox(height: 10),
-          // SNI / Bug Host (if SSL / WebSocket)
-          if (_sshMethod.contains("ssl") || _sshMethod.contains("ws")) ...[
+          // SNI / Bug Host (if SSL / TLS checked)
+          if (_enableSsl) ...[
             TextField(
               controller: _sshSniCtrl,
               enabled: !isLocked,
@@ -761,8 +806,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             ),
             const SizedBox(height: 10),
           ],
-          // Remote Proxy (if HTTP Proxy)
-          if (_sshMethod == "http_proxy") ...[
+          // Remote Proxy (if Proxy checked)
+          if (_enableProxy) ...[
             TextField(
               controller: _sshProxyCtrl,
               enabled: !isLocked,
@@ -771,6 +816,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 labelText: "Remote HTTP Proxy (IP:Port)",
                 hintText: "1.2.3.4:8080",
                 labelStyle: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                hintStyle: TextStyle(color: AppColors.textMuted, fontSize: 11),
                 filled: true,
                 fillColor: AppColors.surfaceLight,
                 isDense: true,
@@ -779,10 +825,47 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             ),
             const SizedBox(height: 10),
           ],
-          // Payload Generator Box
-          PayloadBox(
-            controller: _sshPayloadCtrl,
-            isLocked: isLocked,
+          // Payload Generator Box (if Payload checked)
+          if (_enablePayload) ...[
+            PayloadBox(
+              controller: _sshPayloadCtrl,
+              isLocked: isLocked,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDarkTunnelCheckbox({
+    required String title,
+    required bool value,
+    required ValueChanged<bool?>? onChanged,
+  }) {
+    return InkWell(
+      onTap: onChanged != null ? () => onChanged(!value) : null,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 22,
+            height: 22,
+            child: Checkbox(
+              value: value,
+              onChanged: onChanged,
+              activeColor: AppColors.primary,
+              checkColor: Colors.white,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+          ),
+          const SizedBox(width: 4),
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: value ? FontWeight.bold : FontWeight.normal,
+              color: value ? AppColors.primaryLight : AppColors.textSecondary,
+            ),
           ),
         ],
       ),
