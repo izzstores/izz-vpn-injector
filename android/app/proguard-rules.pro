@@ -14,6 +14,10 @@
 # Keep hev-socks5-tunnel
 -keep class hev.htproxy.** { *; }
 
+# Keep JSch (HTTP Custom SSH Engine)
+-keep class com.jcraft.jsch.** { *; }
+-dontwarn com.jcraft.jsch.**
+
 # Keep Kotlin metadata
 -keepclassmembers class * {
     @kotlin.Metadata *;
