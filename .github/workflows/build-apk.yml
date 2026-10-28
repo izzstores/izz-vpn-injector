@@ -51,7 +51,7 @@ jobs:
         run: flutter pub get
 
       - name: Build Android Release APK
-        run: flutter build apk --release
+        run: flutter build apk --release --obfuscate --split-debug-info=build/debug-info --tree-shake-icons
 
       - name: Verify APK Generated
         run: |
