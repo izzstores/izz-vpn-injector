@@ -93,47 +93,13 @@ class ConfigBuilder {
       "server_port": port,
       "user": username,
       "password": password,
+      "_enable_ssl": enableSsl,
+      "_sni": sni,
+      "_enable_payload": enablePayload,
+      "_payload": payload,
+      "_enable_proxy": enableProxy,
+      "_remote_proxy": remoteProxy,
     };
-
-    if (enablePayload) {
-      proxyOutbound["transport"] = {
-        "type": "ws",
-        "path": "/",
-        "headers": {
-          "Host": sni.isNotEmpty ? sni : server,
-          "Upgrade": "websocket",
-        }
-      };
-    }
-
-    if (enableSsl) {
-      proxyOutbound["tls"] = {
-        "enabled": true,
-        "server_name": sni.isNotEmpty ? sni : server,
-        "insecure": true,
-      };
-    }
-
-    if (enableProxy && remoteProxy.isNotEmpty) {
-      final proxyParts = remoteProxy.split(":");
-      final proxyHost = proxyParts[0];
-      final proxyPort = proxyParts.length > 1 ? int.tryParse(proxyParts[1]) ?? 8080 : 8080;
-
-      proxyOutbound["detour"] = "http-proxy-out";
-      return _wrapSingBox(
-        outbounds: [
-          proxyOutbound,
-          {
-            "type": "http",
-            "tag": "http-proxy-out",
-            "server": proxyHost,
-            "server_port": proxyPort,
-          },
-          {"type": "direct", "tag": "direct"},
-          {"type": "block", "tag": "block"},
-        ],
-      );
-    }
 
     return _wrapSingBox(outbounds: [
       proxyOutbound,

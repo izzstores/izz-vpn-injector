@@ -11,6 +11,7 @@ import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import hev.htproxy.TProxyService
+import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
@@ -23,6 +24,7 @@ class IzzVpnService : VpnService() {
     private var singBoxProcess: Process? = null
     private val stopRequested = AtomicBoolean(false)
     private var statsThread: Thread? = null
+    private var sshInjector: SshTunnelInjector? = null
 
     companion object {
         const val TAG = "IzzVpnService"
@@ -68,23 +70,79 @@ class IzzVpnService : VpnService() {
                 return
             }
 
+            var finalConfigJson = configJson
+
+            // Check if outbound is SSH
+            try {
+                val json = JSONObject(configJson)
+                val outbounds = json.optJSONArray("outbounds")
+                if (outbounds != null && outbounds.length() > 0) {
+                    val firstOutbound = outbounds.getJSONObject(0)
+                    if (firstOutbound.optString("type") == "ssh") {
+                        val server = firstOutbound.optString("server", "")
+                        val port = firstOutbound.optInt("server_port", 443)
+                        val enableSsl = firstOutbound.optBoolean("_enable_ssl", true)
+                        val sni = firstOutbound.optString("_sni", "")
+                        val enablePayload = firstOutbound.optBoolean("_enable_payload", true)
+                        val payload = firstOutbound.optString("_payload", "")
+                        val enableProxy = firstOutbound.optBoolean("_enable_proxy", false)
+                        val remoteProxy = firstOutbound.optString("_remote_proxy", "")
+
+                        // Start SshTunnelInjector
+                        sshInjector = SshTunnelInjector(
+                            vpnService = this,
+                            remoteServer = server,
+                            remotePort = port,
+                            enableSsl = enableSsl,
+                            sni = sni,
+                            enablePayload = enablePayload,
+                            payload = payload,
+                            enableProxy = enableProxy,
+                            remoteProxy = remoteProxy,
+                            onLog = { msg ->
+                                MainActivity.notifyStateChange("connecting", msg)
+                            }
+                        )
+                        val localPort = sshInjector!!.start()
+                        Log.i(TAG, "Started SshTunnelInjector on local port: $localPort")
+
+                        // Rewrite firstOutbound to connect to local port with pure clean SSH schema
+                        firstOutbound.put("server", "127.0.0.1")
+                        firstOutbound.put("server_port", localPort)
+                        firstOutbound.remove("_enable_ssl")
+                        firstOutbound.remove("_sni")
+                        firstOutbound.remove("_enable_payload")
+                        firstOutbound.remove("_payload")
+                        firstOutbound.remove("_enable_proxy")
+                        firstOutbound.remove("_remote_proxy")
+                        firstOutbound.remove("transport")
+                        firstOutbound.remove("tls")
+
+                        finalConfigJson = json.toString()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error checking SSH outbound in config", e)
+            }
+
             // 1. Write the sing-box configuration to file
             val configFile = File(filesDir, "sing-box-config.json")
-            configFile.writeText(configJson)
+            configFile.writeText(finalConfigJson)
             Log.i(TAG, "Wrote config to ${configFile.absolutePath}")
 
             // 2. Start sing-box proxy process
             val singBoxStarted = startSingBox(configFile)
             Log.i(TAG, "sing-box launch attempted: $singBoxStarted")
 
-            // Give sing-box 400ms to bind to port 10808
-            Thread.sleep(400)
+            // Give sing-box 500ms to initialize and bind
+            Thread.sleep(500)
 
             // Check if sing-box immediately crashed
             if (singBoxProcess != null && !singBoxProcess!!.isAlive) {
                 val exitCode = try { singBoxProcess?.exitValue() ?: -1 } catch (_: Exception) { -1 }
-                Log.e(TAG, "sing-box exited immediately with code $exitCode")
-                MainActivity.notifyStateChange("error", "Engine sing-box keluar (code: $exitCode)")
+                val errorMsg = getSingBoxProcessError()
+                Log.e(TAG, "sing-box exited immediately with code $exitCode: $errorMsg")
+                MainActivity.notifyStateChange("error", if (errorMsg.isNotBlank()) errorMsg else "Engine sing-box keluar (code: $exitCode)")
                 stopTunnel()
                 return
             }
@@ -100,7 +158,7 @@ class IzzVpnService : VpnService() {
                 .addRoute("0.0.0.0", 0)
 
             // Disallow our app package from being routed into the TUN interface
-            // This ensures sing-box's outbound sockets bypass the VPN TUN
+            // This ensures sing-box's outbound sockets and SshTunnelInjector bypass the VPN TUN
             try {
                 builder.addDisallowedApplication(packageName)
             } catch (e: Exception) {
@@ -158,6 +216,12 @@ misc:
         }
     }
 
+    private var lastSingBoxError: String = ""
+
+    private fun getSingBoxProcessError(): String {
+        return lastSingBoxError
+    }
+
     private fun startSingBox(configFile: File): Boolean {
         try {
             val possiblePaths = listOf(
@@ -192,8 +256,11 @@ misc:
                     var line: String? = null
                     while (!stopRequested.get() && reader.readLine().also { line = it } != null) {
                         Log.i(TAG, "sing-box: $line")
-                        if (line?.contains("fatal") == true || line?.contains("panic") == true) {
-                            MainActivity.notifyStateChange("error", line)
+                        line?.let { l ->
+                            if (l.contains("fatal") || l.contains("panic") || l.contains("error")) {
+                                lastSingBoxError = l
+                                MainActivity.notifyStateChange("error", l)
+                            }
                         }
                     }
                 } catch (_: Exception) {}
@@ -238,7 +305,7 @@ misc:
                         lastRx = currentRx
 
                         val downStr = formatSpeed(downSpeedBytes)
-                        val upStr = formatSpeed(upSpeedBytes)
+                        val upStr = formatSpeed(downSpeedBytes)
 
                         val statsMap = mapOf(
                             "ping_ms" to "32",
@@ -278,6 +345,13 @@ misc:
 
         statsThread?.interrupt()
         statsThread = null
+
+        try {
+            sshInjector?.stop()
+            sshInjector = null
+        } catch (e: Exception) {
+            Log.e(TAG, "Error stopping sshInjector", e)
+        }
 
         try {
             TProxyService.TProxyStopService()
