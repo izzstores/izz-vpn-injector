@@ -189,7 +189,7 @@ misc:
             Thread {
                 try {
                     val reader = BufferedReader(InputStreamReader(singBoxProcess!!.inputStream))
-                    var line: String?
+                    var line: String? = null
                     while (!stopRequested.get() && reader.readLine().also { line = it } != null) {
                         Log.i(TAG, "sing-box: $line")
                         if (line?.contains("fatal") == true || line?.contains("panic") == true) {
