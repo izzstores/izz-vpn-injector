@@ -10,8 +10,8 @@ class ConfigBuilder {
     required String username,
     required String password,
   }) {
-    final finalServer = memberServer.trim().isNotEmpty ? memberServer.trim() : template.server;
-    final finalPort = memberPort > 0 ? memberPort : template.port;
+    final finalServer = memberServer.trim();
+    final finalPort = memberPort > 0 ? memberPort : 443;
     final protocol = template.protocol.toLowerCase();
     final sni = template.sni ?? "";
     final payload = template.payload ?? "";

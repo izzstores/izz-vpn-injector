@@ -68,6 +68,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   VpnState _vpnState = VpnState.disconnected;
   StreamSubscription? _vpnStateSub;
   StreamSubscription? _vpnStatsSub;
+  StreamSubscription? _vpnErrorSub;
   Timer? _durationTimer;
   int _connectedSeconds = 0;
   String _ping = "-- ms";
@@ -94,7 +95,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         } else if (state == VpnState.authenticating) {
           _addLog("Status: Handshaking & Authenticating...");
         } else if (state == VpnState.error) {
-          _addLog("Status: ERROR - Connection aborted or timed out.");
+          final errMsg = VpnService.lastErrorMessage;
+          if (errMsg != null && errMsg.isNotEmpty) {
+            _addLog("Status: ERROR - $errMsg");
+          } else {
+            _addLog("Status: ERROR - Connection aborted or timed out.");
+          }
           _stopDurationTimer();
         } else {
           _addLog("Status: Disconnected.");
@@ -111,6 +117,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       });
     });
 
+    _vpnErrorSub = VpnService.errorStream.listen((errorMsg) {
+      _addLog("VPN Error: $errorMsg");
+    });
+
     _loadPreferences();
     _fetchCloudTemplates();
   }
@@ -120,6 +130,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     _tabController.dispose();
     _vpnStateSub?.cancel();
     _vpnStatsSub?.cancel();
+    _vpnErrorSub?.cancel();
     _durationTimer?.cancel();
     _logScrollController.dispose();
     _sshServerCtrl.dispose();
@@ -211,13 +222,13 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   Future<void> _fetchCloudTemplates() async {
     setState(() => _isLoadingTemplates = true);
-    _addLog("Cloud: Fetching tricks & payload templates...");
+    _addLog("Cloud: Fetching template configs...");
     final resp = await ApiService.fetchTemplates();
     setState(() {
       _isLoadingTemplates = false;
       if (resp != null) {
         _cloudConfig = resp;
-        _addLog("Cloud: ${resp.templates.length} tricks loaded (v${resp.appVersion}).");
+        _addLog("Cloud: ${resp.templates.length} template configs loaded.");
         if (resp.templates.isNotEmpty && _selectedTemplate == null) {
           _selectedTemplate = resp.templates.first;
         }
@@ -509,7 +520,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             }
           },
           itemBuilder: (ctx) => [
-            const PopupMenuItem(value: "open", child: Row(children: [Icon(Icons.folder_rounded, size: 18, color: AppColors.primaryLight), SizedBox(width: 10), Text("Open Config (.izz / .hc)", style: TextStyle(color: AppColors.textPrimary, fontSize: 13))])),
+            const PopupMenuItem(value: "open", child: Row(children: [Icon(Icons.folder_rounded, size: 18, color: AppColors.primaryLight), SizedBox(width: 10), Text("Open Config", style: TextStyle(color: AppColors.textPrimary, fontSize: 13))])),
             const PopupMenuItem(value: "save", child: Row(children: [Icon(Icons.save_rounded, size: 18, color: AppColors.primaryLight), SizedBox(width: 10), Text("Save Config", style: TextStyle(color: AppColors.textPrimary, fontSize: 13))])),
             const PopupMenuItem(value: "clear", child: Row(children: [Icon(Icons.clear_all_rounded, size: 18, color: AppColors.error), SizedBox(width: 10), Text("Clear / Reset", style: TextStyle(color: AppColors.textPrimary, fontSize: 13))])),
           ],
@@ -599,7 +610,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         tabs: const [
           Tab(text: "SSH INJECT"),
           Tab(text: "V2RAY/XRAY"),
-          Tab(text: "CLOUD TRICKS"),
+          Tab(text: "TEMPLATE CONFIG"),
           Tab(text: "LOG"),
         ],
       ),
@@ -1011,7 +1022,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text("1. PILIH TRIK KUOTA / OPERATOR", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.primaryLight)),
+          const Text("1. PILIH TEMPLATE CONFIG", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.primaryLight)),
           const SizedBox(height: 8),
           // Category Pills
           SingleChildScrollView(

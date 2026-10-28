@@ -3,8 +3,6 @@ class TemplateModel {
   final String name;
   final String category;
   final String protocol;
-  final String server;
-  final int port;
   final String encryptedConfig;
   final String? sni;
   final String? payload;
@@ -15,8 +13,6 @@ class TemplateModel {
     required this.name,
     required this.category,
     required this.protocol,
-    required this.server,
-    required this.port,
     required this.encryptedConfig,
     this.sni,
     this.payload,
@@ -29,8 +25,6 @@ class TemplateModel {
       name: json['name'] as String? ?? 'Unnamed Template',
       category: json['category'] as String? ?? 'Umum',
       protocol: json['protocol'] as String? ?? 'ssh-ws',
-      server: json['server'] as String? ?? '',
-      port: json['port'] as int? ?? 80,
       encryptedConfig: json['encrypted_config'] as String? ?? '',
       updatedAt: json['updated_at'] as String?,
     );
@@ -45,8 +39,6 @@ class TemplateModel {
       name: name,
       category: category,
       protocol: protocol,
-      server: server,
-      port: port,
       encryptedConfig: encryptedConfig,
       sni: sni ?? this.sni,
       payload: payload ?? this.payload,
@@ -60,8 +52,6 @@ class TemplateModel {
       'name': name,
       'category': category,
       'protocol': protocol,
-      'server': server,
-      'port': port,
       'encrypted_config': encryptedConfig,
       'sni': sni,
       'payload': payload,

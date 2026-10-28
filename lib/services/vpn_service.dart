@@ -17,19 +17,23 @@ class VpnService {
       StreamController<VpnState>.broadcast();
   static final StreamController<Map<String, dynamic>> _statsController =
       StreamController<Map<String, dynamic>>.broadcast();
+  static final StreamController<String> _errorController =
+      StreamController<String>.broadcast();
 
   static VpnState _currentState = VpnState.disconnected;
   static VpnState get currentState => _currentState;
+  static String? _lastErrorMessage;
+  static String? get lastErrorMessage => _lastErrorMessage;
 
   static Stream<VpnState> get stateStream => _stateController.stream;
   static Stream<Map<String, dynamic>> get statsStream => _statsController.stream;
+  static Stream<String> get errorStream => _errorController.stream;
 
   static void initialize() {
     _channel.setMethodCallHandler((call) async {
       switch (call.method) {
         case "onStateChanged":
-          final stateStr = call.arguments as String? ?? "disconnected";
-          _updateState(_parseState(stateStr));
+          _handleStateChanged(call.arguments);
           break;
         case "onStats":
           final stats = Map<String, dynamic>.from(call.arguments as Map);
@@ -39,20 +43,64 @@ class VpnService {
     });
   }
 
+  /// Handle state change from native side.
+  /// Arguments can be:
+  ///   - A String (legacy: just the state name)
+  ///   - A Map with "state" and optional "message" keys
+  static void _handleStateChanged(dynamic arguments) {
+    String stateStr;
+    String? message;
+
+    if (arguments is Map) {
+      stateStr = (arguments["state"] as String?) ?? "disconnected";
+      message = arguments["message"] as String?;
+    } else if (arguments is String) {
+      stateStr = arguments;
+      message = null;
+    } else {
+      stateStr = "disconnected";
+      message = null;
+    }
+
+    final newState = _parseState(stateStr);
+
+    if (newState == VpnState.error && message != null) {
+      _lastErrorMessage = message;
+      _errorController.add(message);
+    } else if (newState == VpnState.connected) {
+      _lastErrorMessage = null;
+    }
+
+    _updateState(newState);
+  }
+
   static Future<bool> startVpn(String configJson) async {
     try {
+      _lastErrorMessage = null;
       _updateState(VpnState.connecting);
+
       final bool? result = await _channel.invokeMethod<bool>('startVpn', {
         'config': configJson,
       });
-      if (result == true) {
-        _updateState(VpnState.connected);
-        return true;
-      } else {
-        _updateState(VpnState.error);
+
+      if (result != true) {
+        // User denied VPN permission or other immediate failure
+        _updateState(VpnState.disconnected);
         return false;
       }
-    } on PlatformException catch (_) {
+
+      // result == true means the native side accepted the start command.
+      // The ACTUAL connection state will be reported via onStateChanged callback.
+      // Do NOT set connected here — wait for the native side to confirm.
+      return true;
+    } on PlatformException catch (e) {
+      _lastErrorMessage = e.message ?? 'Platform error';
+      _errorController.add(_lastErrorMessage!);
+      _updateState(VpnState.error);
+      return false;
+    } catch (e) {
+      _lastErrorMessage = e.toString();
+      _errorController.add(_lastErrorMessage!);
       _updateState(VpnState.error);
       return false;
     }
@@ -62,6 +110,7 @@ class VpnService {
     try {
       await _channel.invokeMethod('stopVpn');
     } catch (_) {}
+    _lastErrorMessage = null;
     _updateState(VpnState.disconnected);
   }
 
