@@ -3,16 +3,22 @@ package com.izz.tunneling.injector
 import android.net.VpnService
 import android.os.Build
 import android.util.Log
+import com.jcraft.jsch.ChannelDirectTCPIP
 import com.jcraft.jsch.JSch
 import com.jcraft.jsch.Session
 import com.jcraft.jsch.SocketFactory
+import java.io.DataInputStream
+import java.io.DataOutputStream
 import java.io.InputStream
 import java.io.OutputStream
+import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.net.ServerSocket
 import java.net.Socket
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.Properties
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.net.ssl.*
 
 class JSchTunnelManager(
@@ -38,11 +44,12 @@ class JSchTunnelManager(
 
     private var session: Session? = null
     private var workerThread: Thread? = null
-    private var isRunning = false
+    private var socksServer: ServerSocket? = null
+    private val isRunning = AtomicBoolean(false)
 
     fun start() {
-        if (isRunning) return
-        isRunning = true
+        if (isRunning.get()) return
+        isRunning.set(true)
 
         workerThread = Thread {
             try {
@@ -156,19 +163,20 @@ class JSchTunnelManager(
                 sess.connect(20000)
 
                 onLog("SSH Terotentikasi! Server Banner: ${sess.serverVersion}")
-                onLog("Membuka Port Forwarding SOCKS5 pada 127.0.0.1:$LOCAL_SOCKS_PORT...")
-                sess.setPortForwardingD(LOCAL_SOCKS_PORT)
-
                 session = sess
-                onLog("SOCKS5 Proxy Siap!")
+
+                // Start In-Process SOCKS5 Proxy Server on 127.0.0.1:10808
+                startSocks5Server(sess)
+
+                onLog("SOCKS5 Proxy Siap pada 127.0.0.1:$LOCAL_SOCKS_PORT!")
                 onConnected()
 
                 // Keep session alive
-                while (isRunning && sess.isConnected) {
+                while (isRunning.get() && sess.isConnected) {
                     Thread.sleep(2000)
                 }
 
-                if (isRunning && !sess.isConnected) {
+                if (isRunning.get() && !sess.isConnected) {
                     onError("Koneksi SSH terputus.")
                 }
 
@@ -185,8 +193,147 @@ class JSchTunnelManager(
         }
     }
 
+    private fun startSocks5Server(sshSession: Session) {
+        socksServer = ServerSocket(LOCAL_SOCKS_PORT, 50, InetAddress.getByName("127.0.0.1"))
+
+        Thread {
+            while (isRunning.get() && socksServer != null && !socksServer!!.isClosed) {
+                try {
+                    val client = socksServer!!.accept()
+                    Thread {
+                        handleSocksClient(client, sshSession)
+                    }.apply {
+                        name = "socks5-client"
+                        isDaemon = true
+                        start()
+                    }
+                } catch (e: Exception) {
+                    if (!isRunning.get()) break
+                }
+            }
+        }.apply {
+            name = "socks5-listener"
+            isDaemon = true
+            start()
+        }
+    }
+
+    private fun handleSocksClient(client: Socket, sshSession: Session) {
+        var channel: ChannelDirectTCPIP? = null
+        try {
+            val dis = DataInputStream(client.getInputStream())
+            val dos = DataOutputStream(client.getOutputStream())
+
+            // 1. SOCKS5 Auth Handshake
+            val ver = dis.readUnsignedByte()
+            if (ver != 5) {
+                client.close()
+                return
+            }
+            val nmethods = dis.readUnsignedByte()
+            val methods = ByteArray(nmethods)
+            dis.readFully(methods)
+
+            // Reply: Version 5, Method 0 (No Auth)
+            dos.writeByte(5)
+            dos.writeByte(0)
+            dos.flush()
+
+            // 2. SOCKS5 Connect Request
+            val reqVer = dis.readUnsignedByte()
+            val cmd = dis.readUnsignedByte() // 1 = CONNECT
+            val rsv = dis.readUnsignedByte() // 0x00
+            val atyp = dis.readUnsignedByte()
+
+            val destHost: String
+            if (atyp == 1) { // IPv4
+                val ipBytes = ByteArray(4)
+                dis.readFully(ipBytes)
+                destHost = InetAddress.getByAddress(ipBytes).hostAddress ?: ""
+            } else if (atyp == 3) { // Domain name
+                val domainLen = dis.readUnsignedByte()
+                val domainBytes = ByteArray(domainLen)
+                dis.readFully(domainBytes)
+                destHost = String(domainBytes, Charsets.UTF_8)
+            } else if (atyp == 4) { // IPv6
+                val ipBytes = ByteArray(16)
+                dis.readFully(ipBytes)
+                destHost = InetAddress.getByAddress(ipBytes).hostAddress ?: ""
+            } else {
+                dos.write(byteArrayOf(5, 8, 0, 1, 0, 0, 0, 0, 0, 0)) // Address type not supported
+                dos.flush()
+                client.close()
+                return
+            }
+
+            val destPort = dis.readUnsignedShort()
+
+            if (cmd != 1) { // Only CONNECT is supported
+                dos.write(byteArrayOf(5, 7, 0, 1, 0, 0, 0, 0, 0, 0)) // Command not supported
+                dos.flush()
+                client.close()
+                return
+            }
+
+            // 3. Open SSH direct-tcpip channel
+            val ch = sshSession.openChannel("direct-tcpip") as ChannelDirectTCPIP
+            ch.setHost(destHost)
+            ch.setPort(destPort)
+            ch.connect(8000)
+
+            channel = ch
+
+            // Reply: SOCKS5 Success
+            dos.write(byteArrayOf(5, 0, 0, 1, 0, 0, 0, 0, 0, 0))
+            dos.flush()
+
+            // 4. Bi-directional stream forwarding
+            val clientIn = client.getInputStream()
+            val clientOut = client.getOutputStream()
+            val sshIn = ch.inputStream
+            val sshOut = ch.outputStream
+
+            val t1 = Thread {
+                try {
+                    val buf = ByteArray(16384)
+                    var len = 0
+                    while (isRunning.get() && clientIn.read(buf).also { len = it } != -1) {
+                        sshOut.write(buf, 0, len)
+                        sshOut.flush()
+                    }
+                } catch (_: Exception) {}
+            }
+
+            val t2 = Thread {
+                try {
+                    val buf = ByteArray(16384)
+                    var len = 0
+                    while (isRunning.get() && sshIn.read(buf).also { len = it } != -1) {
+                        clientOut.write(buf, 0, len)
+                        clientOut.flush()
+                    }
+                } catch (_: Exception) {}
+            }
+
+            t1.start()
+            t2.start()
+            t1.join()
+            t2.join()
+
+        } catch (e: Exception) {
+            Log.d(TAG, "Socks client error: ${e.message}")
+        } finally {
+            try { channel?.disconnect() } catch (_: Exception) {}
+            try { client.close() } catch (_: Exception) {}
+        }
+    }
+
     fun stop() {
-        isRunning = false
+        isRunning.set(false)
+        try {
+            socksServer?.close()
+            socksServer = null
+        } catch (_: Exception) {}
         try {
             session?.disconnect()
             session = null
