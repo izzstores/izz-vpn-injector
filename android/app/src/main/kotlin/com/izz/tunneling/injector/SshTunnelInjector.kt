@@ -170,7 +170,7 @@ class SshTunnelInjector(
             val t1 = Thread {
                 try {
                     val buf = ByteArray(16384)
-                    var len: Int
+                    var len = 0
                     while (isRunning.get() && clientIn.read(buf).also { len = it } != -1) {
                         targetOut.write(buf, 0, len)
                         targetOut.flush()
@@ -181,7 +181,7 @@ class SshTunnelInjector(
             val t2 = Thread {
                 try {
                     val buf = ByteArray(16384)
-                    var len: Int
+                    var len = 0
                     while (isRunning.get() && targetIn.read(buf).also { len = it } != -1) {
                         clientOut.write(buf, 0, len)
                         clientOut.flush()
