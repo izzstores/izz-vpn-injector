@@ -138,7 +138,7 @@ tunnel:
 socks5:
   port: $LOCAL_PROXY_PORT
   address: 127.0.0.1
-  udp: 'tcp'
+  udp: 'udp'
 
 misc:
   log-level: warn
@@ -282,7 +282,11 @@ misc:
                         Log.i(TAG, "xray: $line")
                         line?.let { l ->
                             singBoxLastLog = l
-                            if (l.contains("FATAL", true) || l.contains("panic", true) || l.contains("error", true)) {
+                            val lower = l.lowercase()
+                            val isWarning = lower.contains("warning") || lower.contains("deprecated") || lower.contains("not recommended")
+                            val isFatal = lower.contains("fatal") || lower.contains("panic") || lower.contains("failed to") || lower.contains("rejected")
+                            if (!isWarning && isFatal && !failureReported) {
+                                failureReported = true
                                 MainActivity.notifyStateChange("error", "Xray: ${l.take(220)}")
                             }
                         }

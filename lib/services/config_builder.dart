@@ -152,7 +152,7 @@ class ConfigBuilder {
 
     final stream = xrayOutbound["streamSettings"] as Map<String, dynamic>;
     if (network == "ws") {
-      stream["wsSettings"] = {"path": path.isNotEmpty ? path : "/", "headers": {"Host": sni.isNotEmpty ? sni : server}};
+      stream["wsSettings"] = {"path": path.isNotEmpty ? path : "/", "host": sni.isNotEmpty ? sni : server};
     } else if (network == "grpc") {
       stream["grpcSettings"] = {"serviceName": path.isNotEmpty ? path : "grpc-service"};
     }
