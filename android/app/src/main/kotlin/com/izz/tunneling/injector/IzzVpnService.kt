@@ -272,14 +272,24 @@ misc:
                         Log.i(TAG, "xray: $line")
                         line?.let { l ->
                             singBoxLastLog = l
-                            if (l.contains("FATAL") || l.contains("panic")) {
-                                MainActivity.notifyStateChange("error", l.take(160))
+                            if (l.contains("FATAL", true) || l.contains("panic", true) || l.contains("error", true)) {
+                                MainActivity.notifyStateChange("error", "Xray: ${l.take(220)}")
                             }
                         }
                     }
-                } catch (_: Exception) {}
+                    if (!stopRequested.get()) {
+                        val code = try { singBoxProcess?.waitFor() } catch (_: Exception) { null }
+                        val detail = singBoxLastLog.trim().takeLast(260)
+                        MainActivity.notifyStateChange(
+                            "error",
+                            "Xray berhenti${code?.let { " (code: $it)" } ?: ""}${if (detail.isNotEmpty()) ": $detail" else ""}"
+                        )
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "xray log reader error", e)
+                }
             }.apply {
-                name = "sing-box-log"
+                name = "xray-log"
                 isDaemon = true
                 start()
             }

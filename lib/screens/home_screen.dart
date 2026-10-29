@@ -86,7 +86,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     VpnService.initialize();
 
     _addLog("Izz Tunnel Engine Initialized");
-    _addLog("Core: sing-box (v1.10.0-native)");
+    _addLog("Core: Xray-core resmi (Android)");
 
     _vpnStateSub = VpnService.stateStream.listen((state) {
       setState(() {
@@ -425,7 +425,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         return;
       }
 
-      _addLog("Passing configuration to sing-box Core...");
+      _addLog("Passing configuration to Xray-core...");
       final success = await VpnService.startVpn(configJson);
       if (!success) {
         _addLog("VpnService: Initialization failed.");
