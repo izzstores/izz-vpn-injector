@@ -29,6 +29,7 @@ class IzzVpnService : VpnService() {
     private var jschManager: JSchTunnelManager? = null
     private var hevStarted = false
     @Volatile private var singBoxLastLog = ""
+    @Volatile private var failureReported = false
 
     companion object {
         const val TAG = "IzzVpnService"
@@ -62,6 +63,8 @@ class IzzVpnService : VpnService() {
     private fun startTunnel(configJson: String) {
         if (isRunning) return
         stopRequested.set(false)
+        failureReported = false
+        singBoxLastLog = ""
 
         try {
             startForeground(NOTIFICATION_ID, buildNotification("Memulai service..."))
@@ -188,6 +191,10 @@ misc:
         configFile.writeText(configJson)
 
         if (!startXray(configFile)) {
+            if (!failureReported) {
+                failureReported = true
+                MainActivity.notifyStateChange("error", "Xray gagal dijalankan: binary atau konfigurasi tidak valid")
+            }
             stopTunnel()
             return
         }
@@ -195,14 +202,17 @@ misc:
         if (!waitForLocalPort(LOCAL_PROXY_PORT, 6000)) {
             val code = try { singBoxProcess?.exitValue() } catch (_: Exception) { null }
             val detail = singBoxLastLog.trim().takeLast(260)
-            MainActivity.notifyStateChange(
-                "error",
-                if (code != null) {
-                    "Xray berhenti (code: $code)${if (detail.isNotEmpty()) ": $detail" else ""}"
-                } else {
-                    "Xray tidak merespons di port $LOCAL_PROXY_PORT${if (detail.isNotEmpty()) ": $detail" else ""}"
-                }
-            )
+            if (!failureReported) {
+                failureReported = true
+                MainActivity.notifyStateChange(
+                    "error",
+                    if (code != null) {
+                        "Xray berhenti (code: $code)${if (detail.isNotEmpty()) ": $detail" else ""}"
+                    } else {
+                        "Xray tidak merespons di port $LOCAL_PROXY_PORT${if (detail.isNotEmpty()) ": $detail" else ""}"
+                    }
+                )
+            }
             stopTunnel()
             return
         }
@@ -242,7 +252,10 @@ misc:
                 File(applicationInfo.nativeLibraryDir, "xray")
             )
             val binary = candidates.firstOrNull { it.exists() && it.canExecute() } ?: run {
-                Log.e(TAG, "Xray binary missing")
+                val detail = candidates.joinToString { "${it.absolutePath} exists=${it.exists()} executable=${it.canExecute()}" }
+                Log.e(TAG, "Xray binary missing: $detail")
+                failureReported = true
+                MainActivity.notifyStateChange("error", "Xray binary tidak ditemukan atau tidak executable")
                 return false
             }
 
@@ -255,6 +268,7 @@ misc:
             val checkCode = check.waitFor()
             if (checkCode != 0) {
                 Log.e(TAG, "Xray config check failed ($checkCode): $checkOutput")
+                failureReported = true
                 MainActivity.notifyStateChange("error", "Config Xray tidak valid: ${checkOutput.take(220)}")
                 return false
             }
@@ -295,7 +309,9 @@ misc:
             }
             true
         } catch (e: Exception) {
-            Log.e(TAG, "startSingBox error", e)
+            Log.e(TAG, "startXray error", e)
+            failureReported = true
+            MainActivity.notifyStateChange("error", "Xray exception: ${e.message ?: e.javaClass.simpleName}")
             false
         }
     }
@@ -371,7 +387,9 @@ misc:
 
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
-        MainActivity.notifyStateChange("disconnected", null)
+        if (!failureReported) {
+            MainActivity.notifyStateChange("disconnected", null)
+        }
     }
 
     override fun onRevoke() {
