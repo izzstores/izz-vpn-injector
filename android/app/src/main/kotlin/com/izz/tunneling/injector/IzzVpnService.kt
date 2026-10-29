@@ -259,9 +259,26 @@ misc:
                 return false
             }
 
+            // Validate before starting. Without this, a malformed VLESS/VMess
+            // config looks like a connection hang while the core exits immediately.
+            val check = ProcessBuilder(binary.absolutePath, "check", "-c", configFile.absolutePath)
+                .redirectErrorStream(true)
+                .directory(filesDir)
+                .start()
+            val checkOutput = check.inputStream.bufferedReader().use { it.readText() }.trim()
+            val checkCode = check.waitFor()
+            if (checkCode != 0) {
+                Log.e(TAG, "sing-box config check failed ($checkCode): $checkOutput")
+                MainActivity.notifyStateChange(
+                    "error",
+                    "Config V2Ray tidak valid: ${checkOutput.take(220)}"
+                )
+                return false
+            }
+
             val pb = ProcessBuilder(binary.absolutePath, "run", "-c", configFile.absolutePath)
-            pb.redirectErrorStream(true)
-            pb.directory(filesDir)
+                .redirectErrorStream(true)
+                .directory(filesDir)
             singBoxProcess = pb.start()
 
             Thread {

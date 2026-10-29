@@ -1,6 +1,17 @@
 class ApiEndpoints {
-  // Base Cloud API URL
-  static const String baseUrl = "https://rioaja.haikara.biz.id/api/v1";
+  // Override at build time:
+  // flutter build apk --dart-define=API_BASE_URL=https://example.com/api/v1
+  static const String baseUrl = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: 'https://rioaja.haikara.biz.id/api/v1',
+  );
+
+  // Optional read-only fallback, for deployments where the VPS API is offline.
+  // The file must use the same CloudConfigResponse JSON shape.
+  static const String fallbackTemplatesUrl = String.fromEnvironment(
+    'TEMPLATES_FALLBACK_URL',
+    defaultValue: '',
+  );
 
   // Endpoints
   static const String templates = "$baseUrl/templates";

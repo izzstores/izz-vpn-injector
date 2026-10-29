@@ -144,7 +144,8 @@ class ConfigBuilder {
       proxyOutbound["method"] = "aes-128-gcm";
     }
 
-    if (security == "tls") {
+    // sing-box does not allow TLS/transport fields on Shadowsocks.
+    if (protocol.toLowerCase() != "shadowsocks" && security == "tls") {
       proxyOutbound["tls"] = {
         "enabled": true,
         "server_name": sni.isNotEmpty ? sni : server,
@@ -152,7 +153,7 @@ class ConfigBuilder {
       };
     }
 
-    if (transport == "ws") {
+    if (protocol.toLowerCase() != "shadowsocks" && transport == "ws") {
       proxyOutbound["transport"] = {
         "type": "ws",
         "path": path.isNotEmpty ? path : "/",
@@ -160,7 +161,7 @@ class ConfigBuilder {
           "Host": sni.isNotEmpty ? sni : server,
         }
       };
-    } else if (transport == "grpc") {
+    } else if (protocol.toLowerCase() != "shadowsocks" && transport == "grpc") {
       proxyOutbound["transport"] = {
         "type": "grpc",
         "service_name": path.isNotEmpty ? path : "grpc-service",
@@ -199,9 +200,10 @@ class ConfigBuilder {
       "outbounds": outbounds,
       "route": {
         "rules": [
-          {"protocol": "dns", "outbound": "dns-remote"},
+          {"protocol": "dns", "outbound": "direct"},
           {"ip_is_private": true, "outbound": "direct"},
         ],
+        "final": "proxy-out",
         "auto_detect_interface": true,
       }
     };

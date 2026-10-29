@@ -11,16 +11,26 @@ class ApiService {
     String clientVersion = "1.0.0",
   }) async {
     try {
-      final uri = Uri.parse("${ApiEndpoints.templates}?client_version=$clientVersion");
-      final response = await http.get(uri).timeout(
-        const Duration(seconds: 12),
-      );
-
-      if (response.statusCode != 200) {
-        return null;
+      final primary = Uri.parse("${ApiEndpoints.templates}?client_version=$clientVersion");
+      http.Response? response;
+      final endpoints = <Uri>[primary];
+      if (ApiEndpoints.fallbackTemplatesUrl.trim().isNotEmpty) {
+        endpoints.add(Uri.parse("${ApiEndpoints.fallbackTemplatesUrl}?client_version=$clientVersion"));
       }
+      for (final uri in endpoints) {
+        try {
+          final candidate = await http.get(uri).timeout(const Duration(seconds: 12));
+          if (candidate.statusCode == 200 && candidate.body.trim().isNotEmpty) {
+            response = candidate;
+            break;
+          }
+        } catch (_) {
+          // Try the next configured endpoint.
+        }
+      }
+      if (response == null) return null;
 
-      final Map<String, dynamic> jsonBody = json.decode(response.body);
+      final Map<String, dynamic> jsonBody = json.decode(response.body) as Map<String, dynamic>;
       final cloudResponse = CloudConfigResponse.fromJson(jsonBody);
 
       // Decrypt each template's sensitive fields (SNI & Payload) in memory
