@@ -15,6 +15,8 @@ import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.util.concurrent.atomic.AtomicBoolean
 
 class IzzVpnService : VpnService() {
@@ -25,6 +27,7 @@ class IzzVpnService : VpnService() {
     private val stopRequested = AtomicBoolean(false)
     private var statsThread: Thread? = null
     private var jschManager: JSchTunnelManager? = null
+    private var hevStarted = false
 
     companion object {
         const val TAG = "IzzVpnService"
@@ -32,6 +35,7 @@ class IzzVpnService : VpnService() {
         const val ACTION_STOP = "com.izz.tunneling.injector.STOP"
         const val CHANNEL_ID = "izz_vpn_service_channel"
         const val NOTIFICATION_ID = 1001
+        const val LOCAL_PROXY_PORT = 10808
 
         var instance: IzzVpnService? = null
             private set
@@ -44,13 +48,12 @@ class IzzVpnService : VpnService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val action = intent?.action
-        if (action == ACTION_STOP) {
-            stopTunnel()
-            return START_NOT_STICKY
-        } else if (action == ACTION_START) {
-            val config = intent.getStringExtra("CONFIG_JSON") ?: ""
-            startTunnel(config)
+        when (intent?.action) {
+            ACTION_STOP -> {
+                stopTunnel()
+                return START_NOT_STICKY
+            }
+            ACTION_START -> startTunnel(intent.getStringExtra("CONFIG_JSON") ?: "")
         }
         return START_STICKY
     }
@@ -64,7 +67,6 @@ class IzzVpnService : VpnService() {
             MainActivity.notifyStateChange("connecting", "Menyiapkan tunnel...")
 
             if (configJson.isBlank()) {
-                Log.e(TAG, "Empty config JSON received")
                 MainActivity.notifyStateChange("error", "Konfigurasi kosong")
                 stopTunnel()
                 return
@@ -72,80 +74,31 @@ class IzzVpnService : VpnService() {
 
             val json = JSONObject(configJson)
             val outbounds = json.optJSONArray("outbounds")
-            val firstOutbound = if (outbounds != null && outbounds.length() > 0) outbounds.getJSONObject(0) else null
-            val isSsh = firstOutbound?.optString("type") == "ssh"
+            val first = if (outbounds != null && outbounds.length() > 0) outbounds.getJSONObject(0) else null
+            val isSsh = first?.optString("type") == "ssh"
 
-            if (isSsh && firstOutbound != null) {
-                // ==========================================
-                // SSH INJECT: Use Pure JSch Engine (HTTP Custom Architecture)
-                // ==========================================
-                val server = firstOutbound.optString("server", "")
-                val port = firstOutbound.optInt("server_port", 443)
-                val user = firstOutbound.optString("user", "")
-                val pass = firstOutbound.optString("password", "")
-                val enableSsl = firstOutbound.optBoolean("_enable_ssl", true)
-                val sni = firstOutbound.optString("_sni", "")
-                val enablePayload = firstOutbound.optBoolean("_enable_payload", true)
-                val payload = firstOutbound.optString("_payload", "")
-                val enableProxy = firstOutbound.optBoolean("_enable_proxy", false)
-                val remoteProxy = firstOutbound.optString("_remote_proxy", "")
+            // TUN Android + hev-socks5-tunnel dibangun lebih dulu (pola V2RayNG / HTTP Injector)
+            if (!establishTun()) {
+                stopTunnel()
+                return
+            }
 
-                jschManager = JSchTunnelManager(
-                    vpnService = this,
-                    host = server,
-                    port = port,
-                    user = user,
-                    pass = pass,
-                    enableSsl = enableSsl,
-                    sni = sni,
-                    enablePayload = enablePayload,
-                    payload = payload,
-                    enableProxy = enableProxy,
-                    remoteProxy = remoteProxy,
-                    onLog = { msg ->
-                        MainActivity.notifyStateChange("connecting", msg)
-                    },
-                    onConnected = {
-                        setupVpnAndHevTunnel()
-                    },
-                    onError = { errMsg ->
-                        MainActivity.notifyStateChange("error", errMsg)
-                        stopTunnel()
-                    }
-                )
-                jschManager!!.start()
-
+            if (isSsh && first != null) {
+                startSshInjector(first)
             } else {
-                // ==========================================
-                // V2RAY / XRAY: Use sing-box Core
-                // ==========================================
-                val configFile = File(filesDir, "sing-box-config.json")
-                configFile.writeText(configJson)
-
-                val singBoxStarted = startSingBox(configFile)
-                Thread.sleep(500)
-
-                if (singBoxProcess != null && !singBoxProcess!!.isAlive) {
-                    val exitCode = try { singBoxProcess?.exitValue() ?: -1 } catch (_: Exception) { -1 }
-                    MainActivity.notifyStateChange("error", "Engine sing-box keluar (code: $exitCode)")
-                    stopTunnel()
-                    return
-                }
-
-                setupVpnAndHevTunnel()
+                startSingBoxCore(configJson)
             }
 
         } catch (e: Exception) {
-            Log.e(TAG, "startTunnel failed: ${e.message}", e)
+            Log.e(TAG, "startTunnel failed", e)
             MainActivity.notifyStateChange("error", "Gagal konek: ${e.message}")
             stopTunnel()
         }
     }
 
-    private fun setupVpnAndHevTunnel() {
-        if (stopRequested.get()) return
-
-        try {
+    /** TUN Android + hev-socks5-tunnel -> SOCKS5 127.0.0.1:10808 */
+    private fun establishTun(): Boolean {
+        return try {
             updateNotification("Membuat interface VPN...")
 
             val builder = Builder()
@@ -159,80 +112,154 @@ class IzzVpnService : VpnService() {
             try {
                 builder.addDisallowedApplication(packageName)
             } catch (e: Exception) {
-                Log.w(TAG, "Could not add disallowed application: ${e.message}")
+                Log.w(TAG, "addDisallowedApplication: ${e.message}")
             }
 
             vpnInterface = builder.establish()
             if (vpnInterface == null) {
-                Log.e(TAG, "Failed to establish VPN interface")
-                MainActivity.notifyStateChange("error", "Gagal membuat interface VPN Android")
-                stopTunnel()
-                return
+                MainActivity.notifyStateChange("error", "Izin VPN ditolak / gagal membuat interface")
+                return false
             }
 
             val tunFd = vpnInterface!!.fd
-            Log.i(TAG, "VPN TUN established with FD: $tunFd")
+            Log.i(TAG, "TUN established fd=$tunFd")
 
             val hevConfigFile = File(filesDir, "hev.yml")
-            val hevConfigYaml = """
+            hevConfigFile.writeText(
+                """
 tunnel:
   mtu: 1500
   ipv4: 172.19.0.1
 
 socks5:
-  port: 10808
+  port: $LOCAL_PROXY_PORT
   address: 127.0.0.1
   udp: 'tcp'
 
 misc:
   log-level: warn
 """.trimIndent()
-            hevConfigFile.writeText(hevConfigYaml)
+            )
 
-            val tproxyStarted = try {
+            hevStarted = try {
                 TProxyService.TProxyStartService(hevConfigFile.absolutePath, tunFd)
             } catch (e: Throwable) {
-                Log.e(TAG, "TProxyStartService error: ${e.message}", e)
+                Log.e(TAG, "TProxyStartService error", e)
                 false
             }
-            Log.i(TAG, "hev-socks5-tunnel started: $tproxyStarted")
-
-            isRunning = true
-            updateNotification("Izz Tunnel - Terhubung")
-            MainActivity.notifyStateChange("connected", null)
-
-            startStatsMonitoring()
-
+            Log.i(TAG, "hev-socks5-tunnel started=$hevStarted")
+            true
         } catch (e: Exception) {
-            Log.e(TAG, "setupVpnAndHevTunnel error", e)
-            MainActivity.notifyStateChange("error", "Gagal mengaktifkan VPN: ${e.message}")
-            stopTunnel()
+            Log.e(TAG, "establishTun error", e)
+            MainActivity.notifyStateChange("error", "Gagal membuat interface VPN: ${e.message}")
+            false
         }
     }
 
+    /** SSH: JSch membuka SOCKS5 di 10808, hev meneruskan TUN ke situ */
+    private fun startSshInjector(first: JSONObject) {
+        val manager = JSchTunnelManager(
+            vpnService = this,
+            host = first.optString("server", ""),
+            port = first.optInt("server_port", 443),
+            user = first.optString("user", ""),
+            pass = first.optString("password", ""),
+            enableSsl = first.optBoolean("_enable_ssl", true),
+            sni = first.optString("_sni", ""),
+            enablePayload = first.optBoolean("_enable_payload", true),
+            payload = first.optString("_payload", ""),
+            enableProxy = first.optBoolean("_enable_proxy", false),
+            remoteProxy = first.optString("_remote_proxy", ""),
+            onLog = { msg -> MainActivity.notifyStateChange("connecting", msg) },
+            onConnected = { markConnected() },
+            onError = { err ->
+                MainActivity.notifyStateChange("error", err)
+                stopTunnel()
+            }
+        )
+        jschManager = manager
+        manager.start()
+    }
+
+    /** V2Ray/Xray: sing-box hanya proxy lokal, TUN tetap dipegang Android */
+    private fun startSingBoxCore(configJson: String) {
+        val configFile = File(filesDir, "sing-box-config.json")
+
+        val patched = try {
+            val root = JSONObject(configJson)
+            val inbounds = root.optJSONArray("inbounds")
+            if (inbounds != null && inbounds.length() > 0) {
+                for (i in 0 until inbounds.length()) {
+                    val ib = inbounds.getJSONObject(i)
+                    ib.put("listen", "127.0.0.1")
+                    ib.put("listen_port", LOCAL_PROXY_PORT)
+                }
+            }
+            root.toString()
+        } catch (e: Exception) {
+            configJson
+        }
+
+        configFile.writeText(patched)
+
+        if (!startSingBox(configFile)) {
+            MainActivity.notifyStateChange("error", "Core proxy tidak ditemukan di dalam APK")
+            stopTunnel()
+            return
+        }
+
+        val ready = waitForLocalPort(LOCAL_PROXY_PORT, 6000)
+        if (!ready) {
+            val code = try { singBoxProcess?.exitValue() } catch (_: Exception) { null }
+            MainActivity.notifyStateChange(
+                "error",
+                if (code != null) "Core proxy berhenti (code: $code)" else "Core proxy tidak merespons di port $LOCAL_PROXY_PORT"
+            )
+            stopTunnel()
+            return
+        }
+
+        markConnected()
+    }
+
+    private fun waitForLocalPort(port: Int, timeoutMs: Long): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            if (stopRequested.get()) return false
+            if (singBoxProcess != null && !singBoxProcess!!.isAlive) return false
+            try {
+                Socket().use { s ->
+                    s.connect(InetSocketAddress("127.0.0.1", port), 400)
+                    return true
+                }
+            } catch (_: Exception) {
+                Thread.sleep(250)
+            }
+        }
+        return false
+    }
+
+    private fun markConnected() {
+        if (stopRequested.get()) return
+        isRunning = true
+        updateNotification("Izz Tunnel - Terhubung")
+        MainActivity.notifyStateChange("connected", null)
+        startStatsMonitoring()
+    }
+
     private fun startSingBox(configFile: File): Boolean {
-        try {
-            val possiblePaths = listOf(
+        return try {
+            val candidates = listOf(
                 File(applicationInfo.nativeLibraryDir, "libsing-box.so"),
                 File(filesDir, "sing-box"),
                 File(applicationInfo.nativeLibraryDir, "sing-box")
             )
-
-            var singBoxBinary: File? = null
-            for (p in possiblePaths) {
-                if (p.exists() && p.canExecute()) {
-                    singBoxBinary = p
-                    break
-                }
-            }
-
-            if (singBoxBinary == null) {
-                Log.w(TAG, "sing-box binary not found or not executable in nativeLibraryDir")
+            val binary = candidates.firstOrNull { it.exists() && it.canExecute() } ?: run {
+                Log.e(TAG, "sing-box binary missing")
                 return false
             }
 
-            Log.i(TAG, "Starting sing-box from ${singBoxBinary.absolutePath}")
-            val pb = ProcessBuilder(singBoxBinary.absolutePath, "run", "-c", configFile.absolutePath)
+            val pb = ProcessBuilder(binary.absolutePath, "run", "-c", configFile.absolutePath)
             pb.redirectErrorStream(true)
             pb.directory(filesDir)
             singBoxProcess = pb.start()
@@ -244,8 +271,8 @@ misc:
                     while (!stopRequested.get() && reader.readLine().also { line = it } != null) {
                         Log.i(TAG, "sing-box: $line")
                         line?.let { l ->
-                            if (l.contains("fatal") || l.contains("panic")) {
-                                MainActivity.notifyStateChange("error", l)
+                            if (l.contains("FATAL") || l.contains("panic")) {
+                                MainActivity.notifyStateChange("error", l.take(160))
                             }
                         }
                     }
@@ -255,109 +282,81 @@ misc:
                 isDaemon = true
                 start()
             }
-
-            return true
+            true
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to launch sing-box: ${e.message}", e)
-            return false
+            Log.e(TAG, "startSingBox error", e)
+            false
         }
     }
 
     private fun startStatsMonitoring() {
         statsThread?.interrupt()
         statsThread = Thread {
-            var lastTx: Long = 0
-            var lastRx: Long = 0
-
+            var lastTx = 0L
+            var lastRx = 0L
             while (isRunning && !stopRequested.get()) {
                 try {
                     Thread.sleep(1000)
                     if (!isRunning) break
 
-                    val stats = try {
-                        TProxyService.TProxyGetStats()
-                    } catch (_: Throwable) {
-                        null
-                    }
-
+                    val stats = try { TProxyService.TProxyGetStats() } catch (_: Throwable) { null }
                     if (stats != null && stats.size >= 2) {
-                        val currentTx = stats[0]
-                        val currentRx = stats[1]
+                        val tx = stats[0]
+                        val rx = stats[1]
+                        val up = if (lastTx > 0 && tx >= lastTx) tx - lastTx else 0
+                        val down = if (lastRx > 0 && rx >= lastRx) rx - lastRx else 0
+                        lastTx = tx
+                        lastRx = rx
 
-                        val upSpeedBytes = if (lastTx > 0 && currentTx >= lastTx) currentTx - lastTx else 0
-                        val downSpeedBytes = if (lastRx > 0 && currentRx >= lastRx) currentRx - lastRx else 0
-
-                        lastTx = currentTx
-                        lastRx = currentRx
-
-                        val downStr = formatSpeed(downSpeedBytes)
-                        val upStr = formatSpeed(upSpeedBytes)
-
-                        val statsMap = mapOf(
-                            "ping_ms" to "28",
-                            "down_speed" to downStr,
-                            "up_speed" to upStr
+                        MainActivity.notifyStats(
+                            mapOf(
+                                "ping_ms" to "28",
+                                "down_speed" to formatSpeed(down),
+                                "up_speed" to formatSpeed(up)
+                            )
                         )
-                        MainActivity.notifyStats(statsMap)
                     }
                 } catch (_: InterruptedException) {
                     break
                 } catch (e: Exception) {
-                    Log.e(TAG, "Stats thread error: ${e.message}")
+                    Log.e(TAG, "stats error: ${e.message}")
                 }
             }
         }.apply {
-            name = "vpn-stats-thread"
+            name = "vpn-stats"
             isDaemon = true
             start()
         }
     }
 
-    private fun formatSpeed(bytesPerSec: Long): String {
-        return if (bytesPerSec >= 1024 * 1024) {
-            String.format("%.1f MB/s", bytesPerSec.toDouble() / (1024 * 1024))
-        } else if (bytesPerSec >= 1024) {
-            String.format("%d KB/s", bytesPerSec / 1024)
-        } else {
-            "$bytesPerSec B/s"
-        }
+    private fun formatSpeed(bps: Long): String = when {
+        bps >= 1024 * 1024 -> String.format("%.1f MB/s", bps.toDouble() / (1024 * 1024))
+        bps >= 1024 -> String.format("%d KB/s", bps / 1024)
+        else -> "$bps B/s"
     }
 
     private fun stopTunnel() {
-        if (!isRunning && vpnInterface == null && singBoxProcess == null && jschManager == null) return
-
         stopRequested.set(true)
         isRunning = false
 
         statsThread?.interrupt()
         statsThread = null
 
-        try {
-            jschManager?.stop()
-            jschManager = null
-        } catch (e: Exception) {
-            Log.e(TAG, "Error stopping jschManager", e)
+        try { jschManager?.stop() } catch (_: Exception) {}
+        jschManager = null
+
+        if (hevStarted) {
+            try { TProxyService.TProxyStopService() } catch (_: Throwable) {}
+            hevStarted = false
         }
 
-        try {
-            TProxyService.TProxyStopService()
-        } catch (e: Throwable) {
-            Log.e(TAG, "TProxyStopService error: ${e.message}")
-        }
-
-        try {
-            singBoxProcess?.destroyForcibly()
-            singBoxProcess = null
-        } catch (e: Exception) {
-            Log.e(TAG, "Error stopping sing-box: ${e.message}")
-        }
+        try { singBoxProcess?.destroy() } catch (_: Exception) {}
+        singBoxProcess = null
 
         try {
             vpnInterface?.close()
-            vpnInterface = null
-        } catch (e: Exception) {
-            Log.e(TAG, "Error closing VPN interface: ${e.message}")
-        }
+        } catch (_: Exception) {}
+        vpnInterface = null
 
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -381,8 +380,7 @@ misc:
                 "Izz Tunnel Background Service",
                 NotificationManager.IMPORTANCE_LOW
             )
-            val manager = getSystemService(NotificationManager::class.java)
-            manager?.createNotificationChannel(channel)
+            getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
         }
     }
 
@@ -392,7 +390,6 @@ misc:
             this, 0, launchIntent,
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
         )
-
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Izz Tunnel")
             .setContentText(text)
@@ -403,7 +400,6 @@ misc:
     }
 
     private fun updateNotification(text: String) {
-        val manager = getSystemService(NotificationManager::class.java)
-        manager?.notify(NOTIFICATION_ID, buildNotification(text))
+        getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, buildNotification(text))
     }
 }

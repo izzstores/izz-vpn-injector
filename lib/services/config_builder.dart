@@ -193,6 +193,7 @@ class ConfigBuilder {
           "listen": "127.0.0.1",
           "listen_port": 10808,
           "sniff": true,
+          "sniff_override_destination": true,
         }
       ],
       "outbounds": outbounds,
