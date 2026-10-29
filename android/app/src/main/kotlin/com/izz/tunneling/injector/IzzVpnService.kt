@@ -29,6 +29,7 @@ class IzzVpnService : VpnService() {
     private var jschManager: JSchTunnelManager? = null
     private var hevStarted = false
     private var singBoxConfigInvalid = false
+    @Volatile private var singBoxLastLog = ""
 
     companion object {
         const val TAG = "IzzVpnService"
@@ -215,9 +216,14 @@ misc:
         val ready = waitForLocalPort(LOCAL_PROXY_PORT, 6000)
         if (!ready) {
             val code = try { singBoxProcess?.exitValue() } catch (_: Exception) { null }
+            val detail = singBoxLastLog.trim().takeLast(260)
             MainActivity.notifyStateChange(
                 "error",
-                if (code != null) "Core proxy berhenti (code: $code)" else "Core proxy tidak merespons di port $LOCAL_PROXY_PORT"
+                if (code != null) {
+                    "Core proxy berhenti (code: $code)${if (detail.isNotEmpty()) ": $detail" else ""}"
+                } else {
+                    "Core proxy tidak merespons di port $LOCAL_PROXY_PORT${if (detail.isNotEmpty()) ": $detail" else ""}"
+                }
             )
             stopTunnel()
             return
@@ -293,6 +299,7 @@ misc:
                     while (!stopRequested.get() && reader.readLine().also { line = it } != null) {
                         Log.i(TAG, "sing-box: $line")
                         line?.let { l ->
+                            singBoxLastLog = l
                             if (l.contains("FATAL") || l.contains("panic")) {
                                 MainActivity.notifyStateChange("error", l.take(160))
                             }
