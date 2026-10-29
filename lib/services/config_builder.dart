@@ -204,7 +204,8 @@ class ConfigBuilder {
           {"ip_is_private": true, "outbound": "direct"},
         ],
         "final": "proxy-out",
-        "auto_detect_interface": true,
+        // Do not use auto_detect_interface on Android. sing-box attempts
+        // netlink access, which is blocked for regular Android apps.
       }
     };
 

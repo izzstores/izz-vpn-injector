@@ -28,6 +28,7 @@ class IzzVpnService : VpnService() {
     private var statsThread: Thread? = null
     private var jschManager: JSchTunnelManager? = null
     private var hevStarted = false
+    private var singBoxConfigInvalid = false
 
     companion object {
         const val TAG = "IzzVpnService"
@@ -183,6 +184,7 @@ misc:
 
     /** V2Ray/Xray: sing-box hanya proxy lokal, TUN tetap dipegang Android */
     private fun startSingBoxCore(configJson: String) {
+        singBoxConfigInvalid = false
         val configFile = File(filesDir, "sing-box-config.json")
 
         val patched = try {
@@ -203,7 +205,9 @@ misc:
         configFile.writeText(patched)
 
         if (!startSingBox(configFile)) {
-            MainActivity.notifyStateChange("error", "Core proxy tidak ditemukan di dalam APK")
+            if (!singBoxConfigInvalid) {
+                MainActivity.notifyStateChange("error", "Core proxy tidak ditemukan di dalam APK")
+            }
             stopTunnel()
             return
         }
@@ -269,6 +273,7 @@ misc:
             val checkCode = check.waitFor()
             if (checkCode != 0) {
                 Log.e(TAG, "sing-box config check failed ($checkCode): $checkOutput")
+                singBoxConfigInvalid = true
                 MainActivity.notifyStateChange(
                     "error",
                     "Config V2Ray tidak valid: ${checkOutput.take(220)}"
