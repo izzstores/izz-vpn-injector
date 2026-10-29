@@ -30,6 +30,7 @@ class IzzVpnService : VpnService() {
     private var hevStarted = false
     @Volatile private var singBoxLastLog = ""
     @Volatile private var failureReported = false
+    @Volatile private var xrayTrafficSeen = false
 
     companion object {
         const val TAG = "IzzVpnService"
@@ -64,6 +65,7 @@ class IzzVpnService : VpnService() {
         if (isRunning) return
         stopRequested.set(false)
         failureReported = false
+        xrayTrafficSeen = false
         singBoxLastLog = ""
 
         try {
@@ -202,6 +204,10 @@ misc:
         if (!waitForLocalPort(LOCAL_PROXY_PORT, 6000)) {
             val code = try { singBoxProcess?.exitValue() } catch (_: Exception) { null }
             val detail = singBoxLastLog.trim().takeLast(260)
+            if (xrayTrafficSeen) {
+                markConnected()
+                return
+            }
             if (!failureReported) {
                 failureReported = true
                 MainActivity.notifyStateChange(
@@ -283,6 +289,9 @@ misc:
                         line?.let { l ->
                             singBoxLastLog = l
                             val lower = l.lowercase()
+                            if (lower.contains(" accepted ") || lower.contains(" accepted") || lower.contains(" proxy") && lower.contains("accepted")) {
+                                xrayTrafficSeen = true
+                            }
                             val isWarning = lower.contains("warning") || lower.contains("deprecated") || lower.contains("not recommended")
                             val isFatal = lower.contains("fatal") || lower.contains("panic") || lower.contains("failed to") || lower.contains("rejected")
                             if (!isWarning && isFatal && !failureReported) {
