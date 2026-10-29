@@ -111,7 +111,7 @@ jobs:
             - Menghapus TCP handshake blocker yang menyebabkan koneksi gagal di kartu seluler.
             - Kuota internet & aplikasi lain (WhatsApp, YouTube, Browser, Game) sekarang benar-benar ter-tunneling.
             - Monitoring traffic up/down live dari engine tunnel.
-          files: build/release-apks/*.apk
+          files: build/app/outputs/flutter-apk/app-release.apk
           draft: false
           prerelease: false
         env:
