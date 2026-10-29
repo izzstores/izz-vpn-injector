@@ -50,26 +50,26 @@ jobs:
       - name: Get Dependencies
         run: flutter pub get
 
-      - name: Download sing-box Core Binaries
+      - name: Download official Xray-core Android binaries
         run: |
           mkdir -p android/app/src/main/jniLibs/arm64-v8a
-          mkdir -p android/app/src/main/jniLibs/armeabi-v7a
           mkdir -p android/app/src/main/jniLibs/x86_64
+          XRAY_VERSION="v26.10.29"
 
-          echo "Downloading sing-box arm64..."
-          curl -s -L --retry 3 "https://github.com/SagerNet/sing-box/releases/download/v1.10.1/sing-box-1.10.1-android-arm64.tar.gz" | tar -xz -C /tmp/
-          mv /tmp/sing-box-1.10.1-android-arm64/sing-box android/app/src/main/jniLibs/arm64-v8a/libsing-box.so
+          download_xray() {
+            abi="$1"
+            asset="$2"
+            out="$3"
+            curl -fsSL --retry 3 "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/${asset}" -o /tmp/xray.zip
+            unzip -oq /tmp/xray.zip xray -d /tmp/xray-extract
+            mv /tmp/xray-extract/xray "$out"
+            chmod 755 "$out"
+            rm -rf /tmp/xray-extract /tmp/xray.zip
+          }
 
-          echo "Downloading sing-box armv7..."
-          curl -s -L --retry 3 "https://github.com/SagerNet/sing-box/releases/download/v1.10.1/sing-box-1.10.1-android-armv7.tar.gz" | tar -xz -C /tmp/
-          mv /tmp/sing-box-1.10.1-android-armv7/sing-box android/app/src/main/jniLibs/armeabi-v7a/libsing-box.so
-
-          echo "Downloading sing-box amd64..."
-          curl -s -L --retry 3 "https://github.com/SagerNet/sing-box/releases/download/v1.10.1/sing-box-1.10.1-android-amd64.tar.gz" | tar -xz -C /tmp/
-          mv /tmp/sing-box-1.10.1-android-amd64/sing-box android/app/src/main/jniLibs/x86_64/libsing-box.so
-
-          chmod 755 android/app/src/main/jniLibs/*/libsing-box.so
-          ls -lh android/app/src/main/jniLibs/*/libsing-box.so
+          download_xray arm64 Xray-android-arm64-v8a.zip android/app/src/main/jniLibs/arm64-v8a/libxray.so
+          download_xray amd64 Xray-android-amd64.zip android/app/src/main/jniLibs/x86_64/libxray.so
+          ls -lh android/app/src/main/jniLibs/*/libxray.so
 
       - name: Build Android Release APK
         run: flutter build apk --release --obfuscate --split-debug-info=build/debug-info --tree-shake-icons

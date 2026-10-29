@@ -124,55 +124,59 @@ class ConfigBuilder {
     String sni = "",
     String security = "tls", // 'none', 'tls'
   }) {
-    Map<String, dynamic> proxyOutbound = {
-      "type": protocol.toLowerCase(),
-      "tag": "proxy-out",
-      "server": server,
-      "server_port": port,
+    final normalizedProtocol = protocol.toLowerCase();
+    final normalizedTransport = transport.toLowerCase();
+    final network = normalizedTransport == "grpc" ? "grpc" : (normalizedTransport == "tcp" ? "tcp" : "ws");
+    final xrayOutbound = <String, dynamic>{
+      "protocol": normalizedProtocol,
+      "settings": <String, dynamic>{},
+      "streamSettings": <String, dynamic>{
+        "network": network,
+        "security": security == "tls" ? "tls" : "none",
+      },
     };
 
-    if (protocol.toLowerCase() == "vmess") {
-      proxyOutbound["uuid"] = uuid;
-      proxyOutbound["security"] = "auto";
-      proxyOutbound["alter_id"] = 0;
-    } else if (protocol.toLowerCase() == "vless") {
-      proxyOutbound["uuid"] = uuid;
-    } else if (protocol.toLowerCase() == "trojan") {
-      proxyOutbound["password"] = uuid;
-    } else if (protocol.toLowerCase() == "shadowsocks") {
-      proxyOutbound["password"] = uuid;
-      proxyOutbound["method"] = "aes-128-gcm";
+    if (normalizedProtocol == "vmess") {
+      xrayOutbound["settings"] = {"vnext": [{"address": server, "port": port, "users": [{"id": uuid, "alterId": 0, "security": "auto"}]}]};
+    } else if (normalizedProtocol == "vless") {
+      xrayOutbound["settings"] = {"vnext": [{"address": server, "port": port, "users": [{"id": uuid, "encryption": "none"}]}]};
+    } else if (normalizedProtocol == "trojan") {
+      xrayOutbound["settings"] = {"servers": [{"address": server, "port": port, "password": uuid}]};
+    } else if (normalizedProtocol == "shadowsocks") {
+      xrayOutbound["protocol"] = "shadowsocks";
+      xrayOutbound["settings"] = {"servers": [{"address": server, "port": port, "method": "aes-128-gcm", "password": uuid}]};
+      (xrayOutbound["streamSettings"] as Map<String, dynamic>).clear();
+    } else {
+      throw ArgumentError("Unsupported Xray protocol: $protocol");
     }
 
-    // sing-box does not allow TLS/transport fields on Shadowsocks.
-    if (protocol.toLowerCase() != "shadowsocks" && security == "tls") {
-      proxyOutbound["tls"] = {
-        "enabled": true,
-        "server_name": sni.isNotEmpty ? sni : server,
-        "insecure": true,
-      };
+    final stream = xrayOutbound["streamSettings"] as Map<String, dynamic>;
+    if (network == "ws") {
+      stream["wsSettings"] = {"path": path.isNotEmpty ? path : "/", "headers": {"Host": sni.isNotEmpty ? sni : server}};
+    } else if (network == "grpc") {
+      stream["grpcSettings"] = {"serviceName": path.isNotEmpty ? path : "grpc-service"};
+    }
+    if (security == "tls") {
+      stream["tlsSettings"] = {"serverName": sni.isNotEmpty ? sni : server};
     }
 
-    if (protocol.toLowerCase() != "shadowsocks" && transport == "ws") {
-      proxyOutbound["transport"] = {
-        "type": "ws",
-        "path": path.isNotEmpty ? path : "/",
-        "headers": {
-          "Host": sni.isNotEmpty ? sni : server,
-        }
-      };
-    } else if (protocol.toLowerCase() != "shadowsocks" && transport == "grpc") {
-      proxyOutbound["transport"] = {
-        "type": "grpc",
-        "service_name": path.isNotEmpty ? path : "grpc-service",
-      };
-    }
+    return _wrapXray(outbound: xrayOutbound);
 
-    return _wrapSingBox(outbounds: [
-      proxyOutbound,
-      {"type": "direct", "tag": "direct"},
-      {"type": "block", "tag": "block"},
-    ]);
+  }
+
+  static String _wrapXray({required Map<String, dynamic> outbound}) {
+    return json.encode({
+      "log": {"loglevel": "warning"},
+      "inbounds": [{
+        "tag": "socks-in",
+        "listen": "127.0.0.1",
+        "port": 10808,
+        "protocol": "socks",
+        "settings": {"auth": "noauth", "udp": true}
+      }],
+      "outbounds": [outbound, {"protocol": "freedom", "tag": "direct"}],
+      "routing": {"domainStrategy": "AsIs", "rules": []}
+    });
   }
 
   static String _wrapSingBox({required List<Map<String, dynamic>> outbounds}) {

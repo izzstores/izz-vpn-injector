@@ -28,7 +28,6 @@ class IzzVpnService : VpnService() {
     private var statsThread: Thread? = null
     private var jschManager: JSchTunnelManager? = null
     private var hevStarted = false
-    private var singBoxConfigInvalid = false
     @Volatile private var singBoxLastLog = ""
 
     companion object {
@@ -88,7 +87,7 @@ class IzzVpnService : VpnService() {
             if (isSsh && first != null) {
                 startSshInjector(first)
             } else {
-                startSingBoxCore(configJson)
+                startXrayCore(configJson)
             }
 
         } catch (e: Exception) {
@@ -183,52 +182,30 @@ misc:
         manager.start()
     }
 
-    /** V2Ray/Xray: sing-box hanya proxy lokal, TUN tetap dipegang Android */
-    private fun startSingBoxCore(configJson: String) {
-        singBoxConfigInvalid = false
-        val configFile = File(filesDir, "sing-box-config.json")
+    /** Xray-core resmi sebagai proxy lokal; TUN tetap dipegang Android + hev. */
+    private fun startXrayCore(configJson: String) {
+        val configFile = File(filesDir, "xray-config.json")
+        configFile.writeText(configJson)
 
-        val patched = try {
-            val root = JSONObject(configJson)
-            val inbounds = root.optJSONArray("inbounds")
-            if (inbounds != null && inbounds.length() > 0) {
-                for (i in 0 until inbounds.length()) {
-                    val ib = inbounds.getJSONObject(i)
-                    ib.put("listen", "127.0.0.1")
-                    ib.put("listen_port", LOCAL_PROXY_PORT)
-                }
-            }
-            root.toString()
-        } catch (e: Exception) {
-            configJson
-        }
-
-        configFile.writeText(patched)
-
-        if (!startSingBox(configFile)) {
-            if (!singBoxConfigInvalid) {
-                MainActivity.notifyStateChange("error", "Core proxy tidak ditemukan di dalam APK")
-            }
+        if (!startXray(configFile)) {
             stopTunnel()
             return
         }
 
-        val ready = waitForLocalPort(LOCAL_PROXY_PORT, 6000)
-        if (!ready) {
+        if (!waitForLocalPort(LOCAL_PROXY_PORT, 6000)) {
             val code = try { singBoxProcess?.exitValue() } catch (_: Exception) { null }
             val detail = singBoxLastLog.trim().takeLast(260)
             MainActivity.notifyStateChange(
                 "error",
                 if (code != null) {
-                    "Core proxy berhenti (code: $code)${if (detail.isNotEmpty()) ": $detail" else ""}"
+                    "Xray berhenti (code: $code)${if (detail.isNotEmpty()) ": $detail" else ""}"
                 } else {
-                    "Core proxy tidak merespons di port $LOCAL_PROXY_PORT${if (detail.isNotEmpty()) ": $detail" else ""}"
+                    "Xray tidak merespons di port $LOCAL_PROXY_PORT${if (detail.isNotEmpty()) ": $detail" else ""}"
                 }
             )
             stopTunnel()
             return
         }
-
         markConnected()
     }
 
@@ -257,37 +234,32 @@ misc:
         startStatsMonitoring()
     }
 
-    private fun startSingBox(configFile: File): Boolean {
+    private fun startXray(configFile: File): Boolean {
         return try {
             val candidates = listOf(
-                File(applicationInfo.nativeLibraryDir, "libsing-box.so"),
-                File(filesDir, "sing-box"),
-                File(applicationInfo.nativeLibraryDir, "sing-box")
-            )
+                File(applicationInfo.nativeLibraryDir, "libxray.so"),
+                File(filesDir, "xray"),
+                File(applicationInfo.nativeLibraryDir, "xray")
+            ]
             val binary = candidates.firstOrNull { it.exists() && it.canExecute() } ?: run {
-                Log.e(TAG, "sing-box binary missing")
+                Log.e(TAG, "Xray binary missing")
                 return false
             }
 
-            // Validate before starting. Without this, a malformed VLESS/VMess
-            // config looks like a connection hang while the core exits immediately.
-            val check = ProcessBuilder(binary.absolutePath, "check", "-c", configFile.absolutePath)
+            // Xray official CLI validates and runs the JSON config directly.
+            val check = ProcessBuilder(binary.absolutePath, "run", "-test", "-config", configFile.absolutePath)
                 .redirectErrorStream(true)
                 .directory(filesDir)
                 .start()
             val checkOutput = check.inputStream.bufferedReader().use { it.readText() }.trim()
             val checkCode = check.waitFor()
             if (checkCode != 0) {
-                Log.e(TAG, "sing-box config check failed ($checkCode): $checkOutput")
-                singBoxConfigInvalid = true
-                MainActivity.notifyStateChange(
-                    "error",
-                    "Config V2Ray tidak valid: ${checkOutput.take(220)}"
-                )
+                Log.e(TAG, "Xray config check failed ($checkCode): $checkOutput")
+                MainActivity.notifyStateChange("error", "Config Xray tidak valid: ${checkOutput.take(220)}")
                 return false
             }
 
-            val pb = ProcessBuilder(binary.absolutePath, "run", "-c", configFile.absolutePath)
+            val pb = ProcessBuilder(binary.absolutePath, "run", "-config", configFile.absolutePath)
                 .redirectErrorStream(true)
                 .directory(filesDir)
             singBoxProcess = pb.start()
@@ -297,7 +269,7 @@ misc:
                     val reader = BufferedReader(InputStreamReader(singBoxProcess!!.inputStream))
                     var line: String? = null
                     while (!stopRequested.get() && reader.readLine().also { line = it } != null) {
-                        Log.i(TAG, "sing-box: $line")
+                        Log.i(TAG, "xray: $line")
                         line?.let { l ->
                             singBoxLastLog = l
                             if (l.contains("FATAL") || l.contains("panic")) {
