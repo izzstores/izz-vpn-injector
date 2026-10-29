@@ -246,16 +246,30 @@ misc:
 
     private fun startXray(configFile: File): Boolean {
         return try {
-            val candidates = listOf(
-                File(applicationInfo.nativeLibraryDir, "libxray.so"),
-                File(filesDir, "xray"),
-                File(applicationInfo.nativeLibraryDir, "xray")
-            )
-            val binary = candidates.firstOrNull { it.exists() && it.canExecute() } ?: run {
-                val detail = candidates.joinToString { "${it.absolutePath} exists=${it.exists()} executable=${it.canExecute()}" }
-                Log.e(TAG, "Xray binary missing: $detail")
+            val packaged = File(applicationInfo.nativeLibraryDir, "libxray.so")
+            val binary = File(filesDir, "xray")
+            if (!binary.exists() || binary.length() != packaged.length()) {
+                if (!packaged.exists() || packaged.length() < 1_000_000L) {
+                    val detail = "${packaged.absolutePath} exists=${packaged.exists()} size=${packaged.length()}"
+                    Log.e(TAG, "Xray packaged binary missing or invalid: $detail")
+                    failureReported = true
+                    MainActivity.notifyStateChange("error", "Xray binary tidak tertanam dengan benar di APK")
+                    return false
+                }
+                packaged.inputStream().use { input ->
+                    binary.outputStream().use { output -> input.copyTo(output) }
+                }
+                if (!binary.setExecutable(true, false)) {
+                    Log.w(TAG, "Could not set executable bit through Java API")
+                }
+                binary.setReadable(true, false)
+                binary.setWritable(true, true)
+            }
+            if (!binary.exists() || binary.length() < 1_000_000L || !binary.canExecute()) {
+                val detail = "${binary.absolutePath} exists=${binary.exists()} size=${binary.length()} executable=${binary.canExecute()}"
+                Log.e(TAG, "Xray binary unusable: $detail")
                 failureReported = true
-                MainActivity.notifyStateChange("error", "Xray binary tidak ditemukan atau tidak executable")
+                MainActivity.notifyStateChange("error", "Xray binary gagal disiapkan untuk dieksekusi")
                 return false
             }
 
