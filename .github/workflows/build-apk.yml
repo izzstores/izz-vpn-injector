@@ -52,6 +52,7 @@ jobs:
 
       - name: Download official Xray-core Android binaries
         run: |
+          rm -rf android/app/src/main/assets/xray
           mkdir -p android/app/src/main/assets/xray
           XRAY_VERSION="v26.10.29"
 
@@ -66,38 +67,31 @@ jobs:
             rm -rf /tmp/xray-extract /tmp/xray.zip
           }
 
+          # Android packages exist for arm64 and amd64. Static Linux builds
+          # provide the 32-bit ARM and x86 variants for universal APK use.
           download_xray arm64 Xray-android-arm64-v8a.zip /tmp/xray-arm64
           download_xray x86_64 Xray-android-amd64.zip /tmp/xray-x86_64
-          # Xray does not publish an Android ARM32 archive; its static Linux
-          # ARMv7 binary is compatible with Android's 32-bit kernel/userspace.
           download_xray arm32 Xray-linux-arm32-v7a.zip /tmp/xray-arm32
-          ls -lh /tmp/xray-arm*
+          download_xray x86 Xray-linux-32.zip /tmp/xray-x86
+          cp /tmp/xray-arm64 android/app/src/main/assets/xray/arm64-v8a
+          cp /tmp/xray-arm32 android/app/src/main/assets/xray/armeabi-v7a
+          cp /tmp/xray-x86_64 android/app/src/main/assets/xray/x86_64
+          cp /tmp/xray-x86 android/app/src/main/assets/xray/x86
+          ls -lh android/app/src/main/assets/xray/*
 
-      - name: Build ABI-specific Android APKs
+      - name: Build Universal Android APK
+        run: flutter build apk --release --obfuscate --split-debug-info=build/debug-info --tree-shake-icons
+
+      - name: Verify Universal APK
         run: |
-          set -e
-          mkdir -p build/release-apks
-          for spec in "armeabi-v7a:android-arm:xray-arm32" "arm64-v8a:android-arm64:xray-arm64" "x86_64:android-x64:xray-x86_64"; do
-            IFS=: read -r abi target binary <<< "$spec"
-            rm -rf android/app/src/main/assets/xray
-            mkdir -p android/app/src/main/assets/xray
-            cp "/tmp/$binary" "android/app/src/main/assets/xray/$abi"
-            flutter build apk --release --target-platform "$target" --obfuscate --split-debug-info="build/debug-info-$abi" --tree-shake-icons
-            mv build/app/outputs/flutter-apk/app-release.apk "build/release-apks/izz-tunnel-${abi}.apk"
-          done
-          ls -lh build/release-apks/
+          ls -lh build/app/outputs/flutter-apk/
+          test -f build/app/outputs/flutter-apk/app-release.apk
 
-      - name: Verify APKs Generated
-        run: |
-          test -f build/release-apks/izz-tunnel-armeabi-v7a.apk
-          test -f build/release-apks/izz-tunnel-arm64-v8a.apk
-          test -f build/release-apks/izz-tunnel-x86_64.apk
-
-      - name: Upload APK Artifacts
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Izz-Tunnel-${{ steps.version.outputs.tag }}-apks
-          path: build/release-apks/*.apk
+          name: Izz-Tunnel-${{ steps.version.outputs.tag }}-universal.apk
+          path: build/app/outputs/flutter-apk/app-release.apk
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

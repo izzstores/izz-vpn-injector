@@ -247,10 +247,11 @@ misc:
     private fun startXray(configFile: File): Boolean {
         return try {
             val binary = File(filesDir, "xray")
-            val abi = Build.SUPPORTED_ABIS.firstOrNull { it == "armeabi-v7a" || it == "arm64-v8a" || it == "x86_64" }
+            val abi = Build.SUPPORTED_ABIS.firstOrNull { it == "armeabi-v7a" || it == "arm64-v8a" || it == "x86" || it == "x86_64" }
             val assetName = when (abi) {
                 "armeabi-v7a" -> "xray/armeabi-v7a"
                 "arm64-v8a" -> "xray/arm64-v8a"
+                "x86" -> "xray/x86"
                 "x86_64" -> "xray/x86_64"
                 else -> null
             }
