@@ -82,7 +82,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
     VpnService.initialize();
 
     _addLog("Izz Tunnel Engine Initialized");
@@ -126,7 +126,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     });
 
     _loadPreferences();
-    _fetchCloudTemplates();
   }
 
   @override
@@ -289,12 +288,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         _v2rayProtocol = config.v2rayProtocol;
         _v2rayServerCtrl.text = config.server;
         _v2rayPortCtrl.text = config.port.toString();
-        if (config.isAccountLocked) {
-          _v2rayUuidCtrl.text = config.v2rayUuid;
-        }
+        // Imported configs keep protected values only in memory; do not expose
+        // UUID, SNI, path, proxy, or payload in editable fields.
+        _v2rayUuidCtrl.clear();
         _v2rayTransport = config.v2rayTransport;
-        _v2rayPathCtrl.text = config.v2rayPath;
-        _v2raySniCtrl.text = config.sni;
+        _v2rayPathCtrl.text = "";
+        _v2raySniCtrl.clear();
         _v2rayTls = config.v2rayTls;
       } else {
         _tabController.animateTo(0);
@@ -307,9 +306,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           _sshUserCtrl.text = config.username;
           _sshPassCtrl.text = config.password;
         }
-        _sshSniCtrl.text = config.sni;
-        _sshProxyCtrl.text = config.remoteProxy;
-        _sshPayloadCtrl.text = config.payload;
+        // Imported config secrets remain protected and are never shown.
+        _sshSniCtrl.clear();
+        _sshProxyCtrl.clear();
+        _sshPayloadCtrl.clear();
       }
     });
 
@@ -364,14 +364,14 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         configJson = ConfigBuilder.buildSsh(
           server: _sshServerCtrl.text.trim(),
           port: int.tryParse(_sshPortCtrl.text.trim()) ?? 443,
-          username: _sshUserCtrl.text.trim(),
-          password: _sshPassCtrl.text.trim(),
+          username: _loadedConfig?.isAccountLocked == true ? _loadedConfig!.username : _sshUserCtrl.text.trim(),
+          password: _loadedConfig?.isAccountLocked == true ? _loadedConfig!.password : _sshPassCtrl.text.trim(),
           enableSsl: _enableSsl,
-          sni: _sshSniCtrl.text.trim(),
+          sni: _loadedConfig != null ? _loadedConfig!.sni : _sshSniCtrl.text.trim(),
           enablePayload: _enablePayload,
-          payload: _sshPayloadCtrl.text.trim(),
+          payload: _loadedConfig != null ? _loadedConfig!.payload : _sshPayloadCtrl.text.trim(),
           enableProxy: _enableProxy,
-          remoteProxy: _sshProxyCtrl.text.trim(),
+          remoteProxy: _loadedConfig != null ? _loadedConfig!.remoteProxy : _sshProxyCtrl.text.trim(),
         );
       } else if (currentTab == 1) {
         // V2Ray / Xray Mode
@@ -384,10 +384,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           protocol: _v2rayProtocol,
           server: _v2rayServerCtrl.text.trim(),
           port: int.tryParse(_v2rayPortCtrl.text.trim()) ?? 443,
-          uuid: _v2rayUuidCtrl.text.trim(),
+          uuid: _loadedConfig?.isAccountLocked == true ? _loadedConfig!.v2rayUuid : _v2rayUuidCtrl.text.trim(),
           transport: _v2rayTransport,
-          path: _v2rayPathCtrl.text.trim(),
-          sni: _v2raySniCtrl.text.trim(),
+          path: _loadedConfig != null ? _loadedConfig!.v2rayPath : _v2rayPathCtrl.text.trim(),
+          sni: _loadedConfig != null ? _loadedConfig!.sni : _v2raySniCtrl.text.trim(),
           security: _v2rayTls,
         );
       } else if (currentTab == 2) {
@@ -460,7 +460,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 children: [
                   _buildSshCustomTab(),
                   _buildV2RayTab(),
-                  _buildCloudTricksTab(),
                   _buildLogTab(),
                 ],
               ),
@@ -520,6 +519,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 onConfigLoaded: _applyLoadedConfig,
               );
             } else if (val == "save") {
+              if (_loadedConfig != null) {
+                _showError("Config impor milik orang lain tidak dapat disimpan ulang.");
+                return;
+              }
               final isV2Ray = _tabController.index == 1;
               ConfigDialogs.showSaveConfigDialog(
                 context: context,
@@ -568,14 +571,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           onPressed: () {
             Navigator.push(context, MaterialPageRoute(builder: (_) => const ToolsScreen()));
           },
-        ),
-        // Sync Cloud Icon
-        IconButton(
-          icon: _isLoadingTemplates
-              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-              : const Icon(Icons.sync_rounded, color: Colors.white),
-          tooltip: "Sync Cloud Tricks",
-          onPressed: _isLoadingTemplates ? null : _fetchCloudTemplates,
         ),
       ],
     );
@@ -646,7 +641,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         tabs: const [
           Tab(text: "SSH INJECT"),
           Tab(text: "V2RAY/XRAY"),
-          Tab(text: "TEMPLATE CONFIG"),
           Tab(text: "LOG"),
         ],
       ),
@@ -1003,6 +997,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           // UUID / Password
           TextField(
             controller: _v2rayUuidCtrl,
+            readOnly: _loadedConfig != null,
+            obscureText: _loadedConfig != null,
             style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
             decoration: const InputDecoration(
               labelText: "UUID / Password / Key",
@@ -1046,6 +1042,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 flex: 2,
                 child: TextField(
                   controller: _v2rayPathCtrl,
+                  readOnly: _loadedConfig != null,
+                  obscureText: _loadedConfig != null,
                   style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
                   decoration: const InputDecoration(
                     labelText: "Path / Service Name",
