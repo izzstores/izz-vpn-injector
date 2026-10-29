@@ -246,17 +246,31 @@ misc:
 
     private fun startXray(configFile: File): Boolean {
         return try {
-            val packaged = File(applicationInfo.nativeLibraryDir, "libxray.so")
             val binary = File(filesDir, "xray")
-            if (!binary.exists() || binary.length() != packaged.length()) {
-                if (!packaged.exists() || packaged.length() < 1_000_000L) {
-                    val detail = "${packaged.absolutePath} exists=${packaged.exists()} size=${packaged.length()}"
-                    Log.e(TAG, "Xray packaged binary missing or invalid: $detail")
-                    failureReported = true
-                    MainActivity.notifyStateChange("error", "Xray binary tidak tertanam dengan benar di APK")
-                    return false
-                }
-                packaged.inputStream().use { input ->
+            val abi = Build.SUPPORTED_ABIS.firstOrNull { it == "arm64-v8a" || it == "x86_64" }
+            val assetName = when (abi) {
+                "arm64-v8a" -> "xray/arm64-v8a"
+                "x86_64" -> "xray/x86_64"
+                else -> null
+            }
+            if (assetName == null) {
+                failureReported = true
+                MainActivity.notifyStateChange("error", "Arsitektur Android tidak didukung Xray: ${Build.SUPPORTED_ABIS.joinToString()}")
+                return false
+            }
+            val assetSize = try {
+                assets.open(assetName).use { it.available().toLong() }
+            } catch (e: Exception) {
+                Log.e(TAG, "Xray asset missing: $assetName", e)
+                0L
+            }
+            if (assetSize < 1_000_000L) {
+                failureReported = true
+                MainActivity.notifyStateChange("error", "Xray binary asset tidak tersedia untuk ABI $abi")
+                return false
+            }
+            if (!binary.exists() || binary.length() != assetSize) {
+                assets.open(assetName).use { input ->
                     binary.outputStream().use { output -> input.copyTo(output) }
                 }
                 if (!binary.setExecutable(true, false)) {

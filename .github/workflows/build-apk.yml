@@ -54,6 +54,7 @@ jobs:
         run: |
           mkdir -p android/app/src/main/jniLibs/arm64-v8a
           mkdir -p android/app/src/main/jniLibs/x86_64
+          mkdir -p android/app/src/main/assets/xray
           XRAY_VERSION="v26.10.29"
 
           download_xray() {
@@ -68,8 +69,10 @@ jobs:
           }
 
           download_xray arm64 Xray-android-arm64-v8a.zip android/app/src/main/jniLibs/arm64-v8a/libxray.so
+          cp android/app/src/main/jniLibs/arm64-v8a/libxray.so android/app/src/main/assets/xray/arm64-v8a
           download_xray amd64 Xray-android-amd64.zip android/app/src/main/jniLibs/x86_64/libxray.so
-          ls -lh android/app/src/main/jniLibs/*/libxray.so
+          cp android/app/src/main/jniLibs/x86_64/libxray.so android/app/src/main/assets/xray/x86_64
+          ls -lh android/app/src/main/jniLibs/*/libxray.so android/app/src/main/assets/xray/*
 
       - name: Build Android Release APK
         run: flutter build apk --release --obfuscate --split-debug-info=build/debug-info --tree-shake-icons
