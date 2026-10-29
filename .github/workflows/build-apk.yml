@@ -52,8 +52,6 @@ jobs:
 
       - name: Download official Xray-core Android binaries
         run: |
-          mkdir -p android/app/src/main/jniLibs/arm64-v8a
-          mkdir -p android/app/src/main/jniLibs/x86_64
           mkdir -p android/app/src/main/assets/xray
           XRAY_VERSION="v26.10.29"
 
@@ -68,25 +66,38 @@ jobs:
             rm -rf /tmp/xray-extract /tmp/xray.zip
           }
 
-          download_xray arm64 Xray-android-arm64-v8a.zip android/app/src/main/jniLibs/arm64-v8a/libxray.so
-          cp android/app/src/main/jniLibs/arm64-v8a/libxray.so android/app/src/main/assets/xray/arm64-v8a
-          download_xray amd64 Xray-android-amd64.zip android/app/src/main/jniLibs/x86_64/libxray.so
-          cp android/app/src/main/jniLibs/x86_64/libxray.so android/app/src/main/assets/xray/x86_64
-          ls -lh android/app/src/main/jniLibs/*/libxray.so android/app/src/main/assets/xray/*
+          download_xray arm64 Xray-android-arm64-v8a.zip /tmp/xray-arm64
+          download_xray x86_64 Xray-android-amd64.zip /tmp/xray-x86_64
+          # Xray does not publish an Android ARM32 archive; its static Linux
+          # ARMv7 binary is compatible with Android's 32-bit kernel/userspace.
+          download_xray arm32 Xray-linux-arm32-v7a.zip /tmp/xray-arm32
+          ls -lh /tmp/xray-arm*
 
-      - name: Build Android Release APK
-        run: flutter build apk --release --obfuscate --split-debug-info=build/debug-info --tree-shake-icons
-
-      - name: Verify APK Generated
+      - name: Build ABI-specific Android APKs
         run: |
-          ls -lh build/app/outputs/flutter-apk/
-          test -f build/app/outputs/flutter-apk/app-release.apk
+          set -e
+          mkdir -p build/release-apks
+          for spec in "armeabi-v7a:android-arm:xray-arm32" "arm64-v8a:android-arm64:xray-arm64" "x86_64:android-x64:xray-x86_64"; do
+            IFS=: read -r abi target binary <<< "$spec"
+            rm -rf android/app/src/main/assets/xray
+            mkdir -p android/app/src/main/assets/xray
+            cp "/tmp/$binary" "android/app/src/main/assets/xray/$abi"
+            flutter build apk --release --target-platform "$target" --obfuscate --split-debug-info="build/debug-info-$abi" --tree-shake-icons
+            mv build/app/outputs/flutter-apk/app-release.apk "build/release-apks/izz-tunnel-${abi}.apk"
+          done
+          ls -lh build/release-apks/
 
-      - name: Upload APK Artifact
+      - name: Verify APKs Generated
+        run: |
+          test -f build/release-apks/izz-tunnel-armeabi-v7a.apk
+          test -f build/release-apks/izz-tunnel-arm64-v8a.apk
+          test -f build/release-apks/izz-tunnel-x86_64.apk
+
+      - name: Upload APK Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Izz-Tunnel-${{ steps.version.outputs.tag }}.apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: Izz-Tunnel-${{ steps.version.outputs.tag }}-apks
+          path: build/release-apks/*.apk
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -106,7 +117,7 @@ jobs:
             - Menghapus TCP handshake blocker yang menyebabkan koneksi gagal di kartu seluler.
             - Kuota internet & aplikasi lain (WhatsApp, YouTube, Browser, Game) sekarang benar-benar ter-tunneling.
             - Monitoring traffic up/down live dari engine tunnel.
-          files: build/app/outputs/flutter-apk/app-release.apk
+          files: build/release-apks/*.apk
           draft: false
           prerelease: false
         env:
