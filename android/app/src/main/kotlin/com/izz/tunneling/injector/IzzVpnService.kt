@@ -246,46 +246,12 @@ misc:
 
     private fun startXray(configFile: File): Boolean {
         return try {
-            val binary = File(filesDir, "xray")
-            val abi = Build.SUPPORTED_ABIS.firstOrNull { it == "armeabi-v7a" || it == "arm64-v8a" || it == "x86" || it == "x86_64" }
-            val assetName = when (abi) {
-                "armeabi-v7a" -> "xray/armeabi-v7a"
-                "arm64-v8a" -> "xray/arm64-v8a"
-                "x86" -> "xray/x86"
-                "x86_64" -> "xray/x86_64"
-                else -> null
-            }
-            if (assetName == null) {
-                failureReported = true
-                MainActivity.notifyStateChange("error", "Arsitektur Android tidak didukung Xray: ${Build.SUPPORTED_ABIS.joinToString()}")
-                return false
-            }
-            val assetSize = try {
-                assets.open(assetName).use { it.available().toLong() }
-            } catch (e: Exception) {
-                Log.e(TAG, "Xray asset missing: $assetName", e)
-                0L
-            }
-            if (assetSize < 1_000_000L) {
-                failureReported = true
-                MainActivity.notifyStateChange("error", "Xray binary asset tidak tersedia untuk ABI $abi")
-                return false
-            }
-            if (!binary.exists() || binary.length() != assetSize) {
-                assets.open(assetName).use { input ->
-                    binary.outputStream().use { output -> input.copyTo(output) }
-                }
-                if (!binary.setExecutable(true, false)) {
-                    Log.w(TAG, "Could not set executable bit through Java API")
-                }
-                binary.setReadable(true, false)
-                binary.setWritable(true, true)
-            }
+            val binary = File(applicationInfo.nativeLibraryDir, "libxray.so")
             if (!binary.exists() || binary.length() < 1_000_000L || !binary.canExecute()) {
                 val detail = "${binary.absolutePath} exists=${binary.exists()} size=${binary.length()} executable=${binary.canExecute()}"
-                Log.e(TAG, "Xray binary unusable: $detail")
+                Log.e(TAG, "Xray native library unusable: $detail")
                 failureReported = true
-                MainActivity.notifyStateChange("error", "Xray binary gagal disiapkan untuk dieksekusi")
+                MainActivity.notifyStateChange("error", "Xray native library tidak dapat dieksekusi: $detail")
                 return false
             }
 
