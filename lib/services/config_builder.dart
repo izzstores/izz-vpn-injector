@@ -11,23 +11,28 @@ class ConfigBuilder {
     required String password,
   }) {
     final finalServer = memberServer.trim();
-    final finalPort = memberPort > 0 ? memberPort : 443;
     final protocol = template.protocol.toLowerCase();
     final sni = template.sni ?? "";
     final payload = template.payload ?? "";
+    final remoteProxy = template.proxy ?? "";
+
+    final bool enableSsl = template.enableSsl;
+    final bool enableProxy = template.enableProxy || remoteProxy.isNotEmpty;
+    final bool enablePayload = template.enablePayload || payload.isNotEmpty;
+    final int finalPort = memberPort > 0 ? memberPort : (enableSsl ? 443 : 80);
 
     if (protocol.contains("ssh")) {
-      final isSsl = protocol.contains("ssl") || finalPort == 443;
-      final isPayload = payload.isNotEmpty || protocol.contains("ws");
       return buildSsh(
         server: finalServer,
         port: finalPort,
         username: username,
         password: password,
-        enableSsl: isSsl,
+        enableSsl: enableSsl,
         sni: sni,
-        enablePayload: isPayload,
+        enablePayload: enablePayload,
         payload: payload,
+        enableProxy: enableProxy,
+        remoteProxy: remoteProxy,
       );
     } else {
       // V2Ray protocols (vmess, vless, trojan, shadowsocks)

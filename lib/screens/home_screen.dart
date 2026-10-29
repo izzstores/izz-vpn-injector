@@ -61,6 +61,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   final TextEditingController _memberPortCtrl = TextEditingController(text: "443");
   final TextEditingController _memberUserCtrl = TextEditingController();
   final TextEditingController _memberPassCtrl = TextEditingController();
+  final TextEditingController _memberPayloadCtrl = TextEditingController();
+  final TextEditingController _memberProxyCtrl = TextEditingController();
 
   // 4. Live Terminal Logs
   final List<String> _logs = [];
@@ -152,6 +154,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     _memberPortCtrl.dispose();
     _memberUserCtrl.dispose();
     _memberPassCtrl.dispose();
+    _memberPayloadCtrl.dispose();
+    _memberProxyCtrl.dispose();
     super.dispose();
   }
 
@@ -207,6 +211,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       _memberPortCtrl.text = prefs.getString("member_port") ?? "443";
       _memberUserCtrl.text = prefs.getString("member_user") ?? "";
       _memberPassCtrl.text = prefs.getString("member_pass") ?? "";
+      _memberPayloadCtrl.text = prefs.getString("member_payload") ?? "";
+      _memberProxyCtrl.text = prefs.getString("member_proxy") ?? "";
     });
   }
 
@@ -226,6 +232,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     await prefs.setString("member_port", _memberPortCtrl.text);
     await prefs.setString("member_user", _memberUserCtrl.text);
     await prefs.setString("member_pass", _memberPassCtrl.text);
+    await prefs.setString("member_payload", _memberPayloadCtrl.text);
+    await prefs.setString("member_proxy", _memberProxyCtrl.text);
   }
 
   Future<void> _fetchCloudTemplates() async {
@@ -394,9 +402,20 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         }
         _addLog("Applying Trick '${_selectedTemplate!.name}' with server '${_memberServerCtrl.text.trim()}'...");
         configJson = ConfigBuilder.buildFromTemplate(
-          template: _selectedTemplate!,
+          template: _selectedTemplate!.copyWith(
+            payload: (_selectedTemplate!.payload ?? "").isNotEmpty
+                ? _selectedTemplate!.payload
+                : _memberPayloadCtrl.text.trim(),
+            proxy: (_selectedTemplate!.proxy ?? "").isNotEmpty
+                ? _selectedTemplate!.proxy
+                : _memberProxyCtrl.text.trim(),
+            enableProxy: _selectedTemplate!.enableProxy ||
+                (_selectedTemplate!.proxy ?? "").isNotEmpty ||
+                _memberProxyCtrl.text.trim().isNotEmpty,
+          ),
           memberServer: _memberServerCtrl.text.trim(),
-          memberPort: int.tryParse(_memberPortCtrl.text.trim()) ?? 443,
+          memberPort: int.tryParse(_memberPortCtrl.text.trim()) ??
+              (_selectedTemplate!.enableSsl ? 443 : 80),
           username: _memberUserCtrl.text.trim(),
           password: _memberPassCtrl.text.trim(),
         );
@@ -1165,7 +1184,34 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               ),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 10),
+          // Info bug template terpilih
+          if (_selectedTemplate != null) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceLight,
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "BUG TERPASANG: ${(_selectedTemplate!.bugMode == "both") ? "SNI + PROXY" : (_selectedTemplate!.bugMode == "proxy" ? "PROXY" : (_selectedTemplate!.bugMode == "direct" ? "DIRECT" : "SNI"))}",
+                    style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.primaryLight),
+                  ),
+                  if ((_selectedTemplate!.sni ?? "").isNotEmpty)
+                    Text("SNI : ${_selectedTemplate!.sni}", style: const TextStyle(fontSize: 10, color: AppColors.textSecondary)),
+                  if ((_selectedTemplate!.proxy ?? "").isNotEmpty)
+                    Text("PROXY : ${_selectedTemplate!.proxy}", style: const TextStyle(fontSize: 10, color: AppColors.textSecondary)),
+                  if ((_selectedTemplate!.payload ?? "").isNotEmpty)
+                    Text("PAYLOAD : ${_selectedTemplate!.payload!.length > 45 ? "${_selectedTemplate!.payload!.substring(0, 45)}..." : _selectedTemplate!.payload}", style: const TextStyle(fontSize: 10, color: AppColors.textMuted)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+          ],
           const Text("2. MASUKKAN SERVER & AKUN ANDA SENDIRI", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.primaryLight)),
           const SizedBox(height: 8),
           Row(
@@ -1242,6 +1288,37 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 10),
+          const Text("3. BUG PROXY (OPSIONAL)", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.primaryLight)),
+          const SizedBox(height: 6),
+          TextField(
+            controller: _memberProxyCtrl,
+            style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+            decoration: const InputDecoration(
+              hintText: "Kosongkan bila template memakai bug SNI. Contoh: 10.19.19.19:8080",
+              hintStyle: TextStyle(color: AppColors.textMuted, fontSize: 10),
+              filled: true,
+              fillColor: AppColors.surfaceLight,
+              isDense: true,
+              border: OutlineInputBorder(borderSide: BorderSide(color: AppColors.border)),
+            ),
+          ),
+          const SizedBox(height: 10),
+          const Text("4. PAYLOAD MANUAL (OPSIONAL)", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.primaryLight)),
+          const SizedBox(height: 6),
+          TextField(
+            controller: _memberPayloadCtrl,
+            maxLines: 4,
+            style: const TextStyle(color: AppColors.textPrimary, fontSize: 11, fontFamily: 'monospace'),
+            decoration: const InputDecoration(
+              hintText: "Kosongkan jika ingin memakai payload dari template.\nContoh: GET / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf][crlf]",
+              hintStyle: TextStyle(color: AppColors.textMuted, fontSize: 10),
+              filled: true,
+              fillColor: AppColors.surfaceLight,
+              isDense: true,
+              border: OutlineInputBorder(borderSide: BorderSide(color: AppColors.border)),
+            ),
           ),
         ],
       ),

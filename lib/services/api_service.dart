@@ -33,6 +33,7 @@ class ApiService {
             decryptedTemplates.add(t.copyWith(
               sni: decryptedMap['sni'] as String? ?? '',
               payload: decryptedMap['payload'] as String? ?? '',
+              proxy: decryptedMap['proxy'] as String? ?? '',
             ));
             continue;
           }
