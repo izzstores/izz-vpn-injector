@@ -240,7 +240,7 @@ misc:
                 File(applicationInfo.nativeLibraryDir, "libxray.so"),
                 File(filesDir, "xray"),
                 File(applicationInfo.nativeLibraryDir, "xray")
-            ]
+            )
             val binary = candidates.firstOrNull { it.exists() && it.canExecute() } ?: run {
                 Log.e(TAG, "Xray binary missing")
                 return false
