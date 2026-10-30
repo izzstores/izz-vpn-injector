@@ -33,6 +33,14 @@ class VpnService {
   static Stream<Map<String, dynamic>> get statsStream => _statsController.stream;
   static Stream<String> get errorStream => _errorController.stream;
 
+  static Future<String?> getPendingConfig() async {
+    try {
+      return await _channel.invokeMethod<String>('getPendingConfig');
+    } catch (_) {
+      return null;
+    }
+  }
+
   static void initialize() {
     _channel.setMethodCallHandler((call) async {
       switch (call.method) {

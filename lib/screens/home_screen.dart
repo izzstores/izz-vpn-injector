@@ -138,6 +138,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     });
 
     _loadPreferences();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final pending = await VpnService.getPendingConfig();
+      if (!mounted || pending == null || pending.trim().isEmpty) return;
+      ConfigDialogs.handleImportString(context, pending, _applyLoadedConfig, context);
+    });
   }
 
   @override

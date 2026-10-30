@@ -109,9 +109,13 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
 
         channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_NAME)
-        deliverIncomingConfig()
         channel?.setMethodCallHandler { call, result ->
             when (call.method) {
+                "getPendingConfig" -> {
+                    val config = pendingSharedConfig
+                    pendingSharedConfig = null
+                    result.success(config)
+                }
                 "startVpn" -> {
                     val config = call.argument<String>("config") ?: ""
                     if (config.isBlank()) {
