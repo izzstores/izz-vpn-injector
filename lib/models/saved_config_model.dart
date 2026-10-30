@@ -23,7 +23,7 @@ class SavedConfigModel {
 
   // Locks (Classic HTTP Custom)
   final bool isLocked; // lock payload, sni, proxy from editing/viewing
-  final bool isAccountLocked; // lock user/pass or allow user to use their own
+  final bool isAccountLocked; // lock SSH server, username, and password
   final DateTime? expiryDate;
   final bool blockRoot;
   final String? configPassword;

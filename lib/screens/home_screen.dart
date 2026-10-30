@@ -320,10 +320,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         _enableProxy = config.remoteProxy.isNotEmpty || config.sshMethod == "http_proxy";
         _sshServerCtrl.text = config.server;
         _sshPortCtrl.text = config.port.toString();
-        if (config.isAccountLocked) {
-          _sshUserCtrl.text = config.username;
-          _sshPassCtrl.text = config.password;
-        }
+        // A locked account keeps credentials in the loaded model only.
+        // Never put them back into editable fields.
+        _sshUserCtrl.text = config.isAccountLocked ? "" : config.username;
+        _sshPassCtrl.text = config.isAccountLocked ? "" : config.password;
         // Imported config secrets remain protected and are never shown.
         _sshSniCtrl.clear();
         _sshProxyCtrl.clear();
@@ -382,8 +382,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         configJson = ConfigBuilder.buildSsh(
           server: _sshServerCtrl.text.trim(),
           port: int.tryParse(_sshPortCtrl.text.trim()) ?? 443,
-          username: _loadedConfig?.isAccountLocked == true ? _loadedConfig!.username : _sshUserCtrl.text.trim(),
-          password: _loadedConfig?.isAccountLocked == true ? _loadedConfig!.password : _sshPassCtrl.text.trim(),
+          username: _loadedConfig?.mode == "ssh" && _loadedConfig?.isAccountLocked == true
+              ? _loadedConfig!.username
+              : _sshUserCtrl.text.trim(),
+          password: _loadedConfig?.mode == "ssh" && _loadedConfig?.isAccountLocked == true
+              ? _loadedConfig!.password
+              : _sshPassCtrl.text.trim(),
           enableSsl: _enableSsl,
           sni: _loadedConfig != null ? _loadedConfig!.sni : _sshSniCtrl.text.trim(),
           enablePayload: _enablePayload,
@@ -402,7 +406,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           protocol: _v2rayProtocol,
           server: _v2rayServerCtrl.text.trim(),
           port: int.tryParse(_v2rayPortCtrl.text.trim()) ?? 443,
-          uuid: _loadedConfig?.isAccountLocked == true ? _loadedConfig!.v2rayUuid : _v2rayUuidCtrl.text.trim(),
+          uuid: _loadedConfig?.mode == "v2ray" ? _loadedConfig!.v2rayUuid : _v2rayUuidCtrl.text.trim(),
           transport: _v2rayTransport,
           path: _loadedConfig != null ? _loadedConfig!.v2rayPath : _v2rayPathCtrl.text.trim(),
           sni: _loadedConfig != null ? _loadedConfig!.sni : _v2raySniCtrl.text.trim(),
