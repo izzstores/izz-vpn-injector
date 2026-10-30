@@ -214,8 +214,10 @@ class ConfigDialogs {
                       sshMethod: sshMethod,
                       server: server,
                       port: port,
-                      username: mode == "ssh" && lockAccount ? username : "",
-                      password: mode == "ssh" && lockAccount ? password : "",
+                      // Keep SSH credentials even when Lock Account is off;
+                      // the lock controls editing, not credential persistence.
+                      username: mode == "ssh" ? username : "",
+                      password: mode == "ssh" ? password : "",
                       sni: sni,
                       payload: payload,
                       remoteProxy: remoteProxy,

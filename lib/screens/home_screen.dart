@@ -75,6 +75,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   StreamSubscription? _vpnErrorSub;
   StreamSubscription? _configFileSub;
   Timer? _durationTimer;
+  Timer? _reconnectTimer;
+  String? _lastConnectionConfig;
+  bool _manualDisconnectRequested = false;
+  bool _connectionWasEstablished = false;
+  bool _reconnectScheduled = false;
   int _connectedSeconds = 0;
   String _ping = "-- ms";
   String _download = "0 KB/s";
@@ -90,9 +95,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     _addLog("Core: Xray-core resmi (Android)");
 
     _vpnStateSub = VpnService.stateStream.listen((state) {
+      if (!mounted) return;
       setState(() {
         _vpnState = state;
         if (state == VpnState.connected) {
+          _connectionWasEstablished = true;
+          _reconnectScheduled = false;
           _addLog("Status: CONNECTED! Tunnel interface active.");
           _startDurationTimer();
         } else if (state == VpnState.connecting) {
@@ -107,9 +115,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             _addLog("Status: ERROR - Connection aborted or timed out.");
           }
           _stopDurationTimer();
+          _scheduleReconnectIfNeeded();
         } else {
           _addLog("Status: Disconnected.");
           _stopDurationTimer();
+          _scheduleReconnectIfNeeded();
         }
       });
     });
@@ -153,6 +163,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     _vpnErrorSub?.cancel();
     _configFileSub?.cancel();
     _durationTimer?.cancel();
+    _reconnectTimer?.cancel();
     _logScrollController.dispose();
     _sshServerCtrl.dispose();
     _sshPortCtrl.dispose();
@@ -357,10 +368,16 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         _vpnState == VpnState.connecting ||
         _vpnState == VpnState.authenticating) {
       _addLog("User requested DISCONNECT.");
+      _manualDisconnectRequested = true;
+      _connectionWasEstablished = false;
+      _reconnectScheduled = false;
+      _reconnectTimer?.cancel();
       await VpnService.stopVpn();
       return;
     }
 
+    _manualDisconnectRequested = false;
+    _connectionWasEstablished = false;
     await _savePreferences();
 
     String configJson = "";
@@ -448,6 +465,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       }
 
       _addLog("Passing configuration to Xray-core...");
+      _lastConnectionConfig = configJson;
       final success = await VpnService.startVpn(configJson);
       if (!success) {
         _addLog("VpnService: Initialization failed.");
@@ -457,6 +475,27 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       _addLog("Config Error: $e");
       _showError("Error membangun konfigurasi: $e");
     }
+  }
+
+  void _scheduleReconnectIfNeeded() {
+    if (!mounted ||
+        _manualDisconnectRequested ||
+        !_connectionWasEstablished ||
+        _lastConnectionConfig == null ||
+        _reconnectScheduled) {
+      return;
+    }
+
+    _reconnectScheduled = true;
+    _reconnectTimer?.cancel();
+    _addLog("Jaringan bermasalah. Auto-reconnect dalam 3 detik...");
+    _reconnectTimer = Timer(const Duration(seconds: 3), () async {
+      _reconnectScheduled = false;
+      if (!mounted || _manualDisconnectRequested || _lastConnectionConfig == null) return;
+      _addLog("Auto-reconnect: mencoba menghubungkan kembali...");
+      final success = await VpnService.startVpn(_lastConnectionConfig!);
+      if (!success) _scheduleReconnectIfNeeded();
+    });
   }
 
   void _showError(String msg) {
