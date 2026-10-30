@@ -32,6 +32,8 @@ class MainActivity : FlutterActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         pendingSharedConfig = readIncomingConfig(intent)
+        // The singleTask activity is now the foreground task. Keep only the
+        // latest external file intent so WhatsApp/Telegram cannot consume it.
         deliverIncomingConfig()
     }
 
