@@ -6,6 +6,12 @@ import android.net.VpnService
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.nio.charset.StandardCharsets
+import android.net.Uri
+import android.os.Bundle
+import android.provider.OpenableColumns
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -15,6 +21,49 @@ class MainActivity : FlutterActivity() {
     private val VPN_REQUEST_CODE = 9921
     private var pendingConfigJson: String? = null
     private var pendingResult: MethodChannel.Result? = null
+    private var pendingSharedConfig: String? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        pendingSharedConfig = readIncomingConfig(intent)
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        pendingSharedConfig = readIncomingConfig(intent)
+        deliverIncomingConfig()
+    }
+
+    private fun deliverIncomingConfig() {
+        val content = pendingSharedConfig ?: return
+        if (channel == null) return
+        channel?.invokeMethod("onConfigFileOpened", content)
+        pendingSharedConfig = null
+    }
+
+    private fun readIncomingConfig(incoming: Intent?): String? {
+        incoming ?: return null
+        return try {
+            when (incoming.action) {
+                Intent.ACTION_SEND -> {
+                    incoming.getStringExtra(Intent.EXTRA_TEXT)
+                        ?: incoming.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)?.let { readUri(it) }
+                }
+                Intent.ACTION_VIEW -> incoming.data?.let { readUri(it) }
+                else -> null
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to read incoming config", e)
+            null
+        }
+    }
+
+    private fun readUri(uri: Uri): String? {
+        return contentResolver.openInputStream(uri)?.use { input ->
+            input.readBytes().toString(StandardCharsets.UTF_8)
+        }
+    }
 
     companion object {
         const val TAG = "IzzMainActivity"
@@ -56,6 +105,7 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
 
         channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_NAME)
+        deliverIncomingConfig()
         channel?.setMethodCallHandler { call, result ->
             when (call.method) {
                 "startVpn" -> {

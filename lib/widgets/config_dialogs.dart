@@ -343,7 +343,7 @@ class ConfigDialogs {
                           onPressed: () async {
                             final data = await Clipboard.getData('text/plain');
                             if (data != null && data.text != null && data.text!.isNotEmpty) {
-                              _handleImportString(context, data.text!, onConfigLoaded, ctx);
+                              handleImportString(context, data.text!, onConfigLoaded, ctx);
                             } else {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(content: Text("Clipboard kosong!"), backgroundColor: AppColors.error),
@@ -445,7 +445,7 @@ class ConfigDialogs {
     );
   }
 
-  static void _handleImportString(
+  static void handleImportString(
     BuildContext context,
     String raw,
     Function(SavedConfigModel) onLoaded,
@@ -454,7 +454,7 @@ class ConfigDialogs {
     try {
       final config = ConfigStorageService.parseConfigString(raw);
       if (config != null) {
-        Navigator.pop(bottomSheetCtx);
+        if (!identical(bottomSheetCtx, context)) Navigator.pop(bottomSheetCtx);
         onLoaded(config);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("Config '${config.name}' berhasil dimuat!"), backgroundColor: AppColors.primary),

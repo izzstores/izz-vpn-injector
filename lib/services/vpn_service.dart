@@ -19,6 +19,10 @@ class VpnService {
       StreamController<Map<String, dynamic>>.broadcast();
   static final StreamController<String> _errorController =
       StreamController<String>.broadcast();
+  static final StreamController<String> _configFileController =
+      StreamController<String>.broadcast();
+
+  static Stream<String> get configFileStream => _configFileController.stream;
 
   static VpnState _currentState = VpnState.disconnected;
   static VpnState get currentState => _currentState;
@@ -38,6 +42,12 @@ class VpnService {
         case "onStats":
           final stats = Map<String, dynamic>.from(call.arguments as Map);
           _statsController.add(stats);
+          break;
+        case "onConfigFileOpened":
+          final content = call.arguments as String?;
+          if (content != null && content.trim().isNotEmpty) {
+            _configFileController.add(content);
+          }
           break;
       }
     });

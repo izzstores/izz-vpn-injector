@@ -73,6 +73,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   StreamSubscription? _vpnStateSub;
   StreamSubscription? _vpnStatsSub;
   StreamSubscription? _vpnErrorSub;
+  StreamSubscription? _configFileSub;
   Timer? _durationTimer;
   int _connectedSeconds = 0;
   String _ping = "-- ms";
@@ -125,6 +126,17 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       _addLog("VPN Error: $errorMsg");
     });
 
+    _configFileSub = VpnService.configFileStream.listen((raw) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        ConfigDialogs.handleImportString(
+          context,
+          raw,
+          _applyLoadedConfig,
+          context,
+        );
+      });
+    });
+
     _loadPreferences();
   }
 
@@ -134,6 +146,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     _vpnStateSub?.cancel();
     _vpnStatsSub?.cancel();
     _vpnErrorSub?.cancel();
+    _configFileSub?.cancel();
     _durationTimer?.cancel();
     _logScrollController.dispose();
     _sshServerCtrl.dispose();
