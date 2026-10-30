@@ -38,8 +38,12 @@ class MainActivity : FlutterActivity() {
     private fun deliverIncomingConfig() {
         val content = pendingSharedConfig ?: return
         if (channel == null) return
-        channel?.invokeMethod("onConfigFileOpened", content)
-        pendingSharedConfig = null
+        mainHandler.postDelayed({
+            if (channel != null && pendingSharedConfig != null) {
+                channel?.invokeMethod("onConfigFileOpened", pendingSharedConfig)
+                pendingSharedConfig = null
+            }
+        }, 500)
     }
 
     private fun readIncomingConfig(incoming: Intent?): String? {
