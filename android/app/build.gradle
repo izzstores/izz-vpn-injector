@@ -54,9 +54,9 @@ android {
 
     packagingOptions {
         jniLibs {
-            // Modern uncompressed native-library packaging for Android 15 and
-            // devices using 16 KB memory pages.
-            useLegacyPackaging = false
+            // Keep native libraries compressed to preserve the universal APK
+            // size target; targetSdk 35 remains enabled for Android 15.
+            useLegacyPackaging = true
         }
     }
 }

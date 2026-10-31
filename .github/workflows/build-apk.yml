@@ -82,7 +82,9 @@ jobs:
         run: |
           ls -lh build/app/outputs/flutter-apk/
           test -f build/app/outputs/flutter-apk/app-release.apk
-          aapt dump badging build/app/outputs/flutter-apk/app-release.apk | grep "targetSdkVersion:'35'"
+          AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)
+          test -x "$AAPT"
+          "$AAPT" dump badging build/app/outputs/flutter-apk/app-release.apk | grep "targetSdkVersion:'35'"
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
