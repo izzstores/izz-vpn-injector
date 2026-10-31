@@ -41,6 +41,17 @@ class VpnService {
     }
   }
 
+  static Future<bool> setDnsServers(String primary, String secondary) async {
+    try {
+      return await _channel.invokeMethod<bool>('setDnsServers', {
+        'primary': primary,
+        'secondary': secondary,
+      }) ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   static Future<bool> saveConfigFileToDownloads(String name, String content) async {
     try {
       return await _channel.invokeMethod<bool>('saveConfigFileToDownloads', {

@@ -8,6 +8,7 @@ import android.content.Intent
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
+import android.content.SharedPreferences
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import hev.htproxy.TProxyService
@@ -107,12 +108,16 @@ class IzzVpnService : VpnService() {
         return try {
             updateNotification("Membuat interface VPN...")
 
+            val prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
+            val primaryDns = prefs.getString("flutter.custom_dns_primary", "1.1.1.1") ?: "1.1.1.1"
+            val secondaryDns = prefs.getString("flutter.custom_dns_secondary", "1.0.0.1") ?: "1.0.0.1"
+            Log.i(TAG, "Using configured DNS: $primaryDns, $secondaryDns")
             val builder = Builder()
                 .setSession("Izz Tunnel")
                 .setMtu(1500)
                 .addAddress("172.19.0.1", 30)
-                .addDnsServer("1.1.1.1")
-                .addDnsServer("8.8.8.8")
+                .addDnsServer(primaryDns)
+                .addDnsServer(secondaryDns)
                 .addRoute("0.0.0.0", 0)
 
             try {

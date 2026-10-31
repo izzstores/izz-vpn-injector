@@ -75,6 +75,11 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun isValidIpv4(value: String): Boolean {
+        val parts = value.split('.')
+        return parts.size == 4 && parts.all { it.toIntOrNull()?.let { n -> n in 0..255 } == true }
+    }
+
     private fun saveConfigFileToDownloads(name: String, content: String): Boolean {
         return try {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
@@ -146,6 +151,11 @@ class MainActivity : FlutterActivity() {
                     val config = pendingSharedConfig
                     pendingSharedConfig = null
                     result.success(config)
+                }
+                "setDnsServers" -> {
+                    val primary = call.argument<String>("primary")?.trim().orEmpty()
+                    val secondary = call.argument<String>("secondary")?.trim().orEmpty()
+                    result.success(isValidIpv4(primary) && isValidIpv4(secondary))
                 }
                 "saveConfigFileToDownloads" -> {
                     val name = call.argument<String>("name") ?: "config.izz"

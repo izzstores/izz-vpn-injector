@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import '../constants/app_colors.dart';
+import '../services/vpn_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class ToolsScreen extends StatefulWidget {
   const ToolsScreen({super.key});
@@ -42,6 +44,7 @@ class _ToolsScreenState extends State<ToolsScreen> with SingleTickerProviderStat
   void initState() {
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
+    _loadSavedDns();
     _fetchCurrentIp();
   }
 
@@ -150,6 +153,42 @@ class _ToolsScreenState extends State<ToolsScreen> with SingleTickerProviderStat
     } finally {
       setState(() => _isFetchingIp = false);
     }
+  }
+
+  Future<void> _loadSavedDns() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _dns1Ctrl.text = prefs.getString('custom_dns_primary') ?? _dns1Ctrl.text;
+      _dns2Ctrl.text = prefs.getString('custom_dns_secondary') ?? _dns2Ctrl.text;
+      _selectedDnsPreset = prefs.getString('custom_dns_preset') ?? _selectedDnsPreset;
+    });
+  }
+
+  Future<void> _saveDnsSettings() async {
+    final primary = _dns1Ctrl.text.trim();
+    final secondary = _dns2Ctrl.text.trim();
+    final ipPattern = RegExp(r'^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$');
+    if (!ipPattern.hasMatch(primary) || !ipPattern.hasMatch(secondary)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('DNS harus berupa alamat IPv4 yang valid.'), backgroundColor: AppColors.error),
+      );
+      return;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('custom_dns_primary', primary);
+    await prefs.setString('custom_dns_secondary', secondary);
+    await prefs.setString('custom_dns_preset', _selectedDnsPreset);
+    final applied = await VpnService.setDnsServers(primary, secondary);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(applied
+            ? 'DNS disimpan dan akan dipakai pada koneksi VPN berikutnya.'
+            : 'DNS disimpan. Putuskan lalu sambungkan VPN agar diterapkan.'),
+        backgroundColor: AppColors.primary,
+      ),
+    );
   }
 
   void _onDnsPresetChanged(String? val) {
@@ -414,11 +453,7 @@ class _ToolsScreenState extends State<ToolsScreen> with SingleTickerProviderStat
             width: double.infinity,
             height: 44,
             child: ElevatedButton(
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("DNS Forwarder berhasil disetel!"), backgroundColor: AppColors.primary),
-                );
-              },
+              onPressed: _saveDnsSettings,
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
