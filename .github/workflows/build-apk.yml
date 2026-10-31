@@ -55,7 +55,7 @@ jobs:
           rm -rf android/app/src/main/assets/xray android/app/src/main/jniLibs
           mkdir -p android/app/src/main/jniLibs/arm64-v8a
           mkdir -p android/app/src/main/jniLibs/armeabi-v7a
-          XRAY_VERSION="v26.10.29"
+          XRAY_VERSION="v26.10.31"
 
           download_xray() {
             abi="$1"
