@@ -76,6 +76,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   StreamSubscription? _configFileSub;
   Timer? _durationTimer;
   Timer? _reconnectTimer;
+  Timer? _notificationTimer;
   String? _lastConnectionConfig;
   bool _manualDisconnectRequested = false;
   bool _connectionWasEstablished = false;
@@ -84,11 +85,16 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   String _ping = "-- ms";
   String _download = "0 KB/s";
   String _upload = "0 KB/s";
+  String? _notificationText;
+  Color _notificationColor = AppColors.error;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    _tabController.addListener(() {
+      if (mounted) setState(() {});
+    });
     VpnService.initialize();
 
     _addLog("Izz Tunnel Engine Initialized");
@@ -164,6 +170,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     _configFileSub?.cancel();
     _durationTimer?.cancel();
     _reconnectTimer?.cancel();
+    _notificationTimer?.cancel();
     _logScrollController.dispose();
     _sshServerCtrl.dispose();
     _sshPortCtrl.dispose();
@@ -499,9 +506,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   void _showError(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: AppColors.error),
-    );
+    if (!mounted) return;
+    _notificationTimer?.cancel();
+    setState(() {
+      _notificationText = msg;
+      _notificationColor = AppColors.error;
+    });
+    _notificationTimer = Timer(const Duration(seconds: 5), () {
+      if (mounted) setState(() => _notificationText = null);
+    });
   }
 
   @override
@@ -1468,6 +1481,38 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (_notificationText != null) ...[
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              decoration: BoxDecoration(
+                color: _notificationColor.withOpacity(0.14),
+                border: Border.all(color: _notificationColor.withOpacity(0.65)),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline_rounded, size: 15, color: _notificationColor),
+                  const SizedBox(width: 7),
+                  Expanded(
+                    child: Text(
+                      _notificationText!,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 11, color: _notificationColor, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  IconButton(
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints.tightFor(width: 22, height: 22),
+                    icon: Icon(Icons.close, size: 14, color: _notificationColor),
+                    onPressed: () => setState(() => _notificationText = null),
+                  ),
+                ],
+              ),
+            ),
+          ],
           // Stat Badges
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1478,12 +1523,13 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               StatBadge(icon: Icons.timer_outlined, label: "TIME", value: _formatDuration(_connectedSeconds), color: AppColors.warning),
             ],
           ),
-          const SizedBox(height: 10),
-          // Big Utilitarian Solid Connect Button
-          SizedBox(
-            width: double.infinity,
-            height: 48,
-            child: ElevatedButton(
+          if (_tabController.index != 2) ...[
+            const SizedBox(height: 10),
+            // Big Utilitarian Solid Connect Button
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: ElevatedButton(
               onPressed: _toggleConnection,
               style: ElevatedButton.styleFrom(
                 backgroundColor: btnColor,
@@ -1505,7 +1551,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                       style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: 1.0),
                     ),
             ),
-          ),
+            ),
+          ],
         ],
       ),
     );
