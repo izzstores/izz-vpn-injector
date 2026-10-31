@@ -6,6 +6,7 @@ import '../models/saved_config_model.dart';
 import '../services/config_storage_service.dart';
 
 class ConfigDialogs {
+  static final ValueNotifier<String?> importNotice = ValueNotifier<String?>(null);
   /// Classic HTTP Custom Save Config Dialog
   static Future<void> showSaveConfigDialog({
     required BuildContext context,
@@ -235,6 +236,7 @@ class ConfigDialogs {
                     );
 
                     await ConfigStorageService.saveConfig(newConfig);
+                    await ConfigStorageService.saveConfigFileToDownloads(newConfig);
                     Navigator.pop(ctx);
                     onSaved();
 
@@ -458,21 +460,15 @@ class ConfigDialogs {
       if (config != null) {
         if (!identical(bottomSheetCtx, context)) Navigator.pop(bottomSheetCtx);
         onLoaded(config);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Config '${config.name}' berhasil dimuat!"), backgroundColor: AppColors.primary),
-        );
+        importNotice.value = "Config '${config.name}' berhasil dimuat!";
       }
     } catch (e) {
       if (e.toString().contains("PASSWORD_REQUIRED")) {
         _promptPassword(context, raw, onLoaded, bottomSheetCtx);
       } else if (e.toString().contains("CONFIG_EXPIRED")) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Gagal: Config sudah melewati tanggal kadaluarsa!"), backgroundColor: AppColors.error),
-        );
+        importNotice.value = "Gagal: Config sudah melewati tanggal kadaluarsa!";
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Format config tidak valid!"), backgroundColor: AppColors.error),
-        );
+        importNotice.value = "Format config tidak valid!";
       }
     }
   }

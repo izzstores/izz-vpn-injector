@@ -12,6 +12,10 @@ import java.nio.charset.StandardCharsets
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
+import android.provider.MediaStore
+import android.os.Environment
+import android.content.ContentValues
+import java.io.File
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -71,6 +75,31 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun saveConfigFileToDownloads(name: String, content: String): Boolean {
+        return try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, name)
+                    put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
+                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Izz Tunnel")
+                    put(MediaStore.Downloads.IS_PENDING, 1)
+                }
+                val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return false
+                contentResolver.openOutputStream(uri)?.use { it.write(content.toByteArray(StandardCharsets.UTF_8)) }
+                val done = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
+                contentResolver.update(uri, done, null, null) > 0
+            } else {
+                val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Izz Tunnel")
+                if (!dir.exists() && !dir.mkdirs()) return false
+                File(dir, name).writeText(content, Charsets.UTF_8)
+                true
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save config file", e)
+            false
+        }
+    }
+
     companion object {
         const val TAG = "IzzMainActivity"
         const val CHANNEL_NAME = "com.izz.tunneling/vpn"
@@ -117,6 +146,11 @@ class MainActivity : FlutterActivity() {
                     val config = pendingSharedConfig
                     pendingSharedConfig = null
                     result.success(config)
+                }
+                "saveConfigFileToDownloads" -> {
+                    val name = call.argument<String>("name") ?: "config.izz"
+                    val content = call.argument<String>("content") ?: ""
+                    result.success(saveConfigFileToDownloads(name, content))
                 }
                 "startVpn" -> {
                     val config = call.argument<String>("config") ?: ""

@@ -5,6 +5,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/saved_config_model.dart';
+import 'vpn_service.dart';
+
 
 class ConfigStorageService {
   static const String _keyConfigs = "saved_configs_list";
@@ -29,6 +31,11 @@ class ConfigStorageService {
 
     final rawList = configs.map((c) => jsonEncode(c.toJson())).toList();
     await prefs.setStringList(_keyConfigs, rawList);
+  }
+
+  static Future<void> saveConfigFileToDownloads(SavedConfigModel config) async {
+    final safeName = config.name.replaceAll(RegExp(r'[^\w\s\.-]'), '_');
+    await VpnService.saveConfigFileToDownloads('$safeName.izz', config.toExportString());
   }
 
   static Future<void> deleteConfig(String id) async {

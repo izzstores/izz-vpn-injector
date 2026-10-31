@@ -41,6 +41,17 @@ class VpnService {
     }
   }
 
+  static Future<bool> saveConfigFileToDownloads(String name, String content) async {
+    try {
+      return await _channel.invokeMethod<bool>('saveConfigFileToDownloads', {
+        'name': name,
+        'content': content,
+      }) ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   static void initialize() {
     _channel.setMethodCallHandler((call) async {
       switch (call.method) {

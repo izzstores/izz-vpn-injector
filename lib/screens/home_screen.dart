@@ -95,6 +95,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     _tabController.addListener(() {
       if (mounted) setState(() {});
     });
+    ConfigDialogs.importNotice.addListener(_handleImportNotice);
     VpnService.initialize();
 
     _addLog("Izz Tunnel Engine Initialized");
@@ -171,6 +172,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     _durationTimer?.cancel();
     _reconnectTimer?.cancel();
     _notificationTimer?.cancel();
+    ConfigDialogs.importNotice.removeListener(_handleImportNotice);
     _logScrollController.dispose();
     _sshServerCtrl.dispose();
     _sshPortCtrl.dispose();
@@ -511,6 +513,20 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     setState(() {
       _notificationText = msg;
       _notificationColor = AppColors.error;
+    });
+    _notificationTimer = Timer(const Duration(seconds: 5), () {
+      if (mounted) setState(() => _notificationText = null);
+    });
+  }
+
+  void _handleImportNotice() {
+    final notice = ConfigDialogs.importNotice.value;
+    if (!mounted || notice == null || notice.isEmpty) return;
+    ConfigDialogs.importNotice.value = null;
+    _notificationTimer?.cancel();
+    setState(() {
+      _notificationText = notice;
+      _notificationColor = notice.startsWith('Gagal') ? AppColors.error : AppColors.primaryLight;
     });
     _notificationTimer = Timer(const Duration(seconds: 5), () {
       if (mounted) setState(() => _notificationText = null);
@@ -1517,10 +1533,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              StatBadge(icon: Icons.speed_rounded, label: "PING", value: _ping, color: AppColors.cyan),
-              StatBadge(icon: Icons.arrow_downward_rounded, label: "DOWN", value: _download, color: AppColors.success),
-              StatBadge(icon: Icons.arrow_upward_rounded, label: "UP", value: _upload, color: AppColors.info),
-              StatBadge(icon: Icons.timer_outlined, label: "TIME", value: _formatDuration(_connectedSeconds), color: AppColors.warning),
+              Expanded(child: FittedBox(fit: BoxFit.scaleDown, child: StatBadge(icon: Icons.speed_rounded, label: "PING", value: _ping, color: AppColors.cyan))),
+              Expanded(child: FittedBox(fit: BoxFit.scaleDown, child: StatBadge(icon: Icons.arrow_downward_rounded, label: "DOWN", value: _download, color: AppColors.success))),
+              Expanded(child: FittedBox(fit: BoxFit.scaleDown, child: StatBadge(icon: Icons.arrow_upward_rounded, label: "UP", value: _upload, color: AppColors.info))),
+              Expanded(child: FittedBox(fit: BoxFit.scaleDown, child: StatBadge(icon: Icons.timer_outlined, label: "TIME", value: _formatDuration(_connectedSeconds), color: AppColors.warning))),
             ],
           ),
           if (_tabController.index != 2) ...[
