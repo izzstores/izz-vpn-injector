@@ -96,9 +96,9 @@ class IzzVpnService : VpnService() {
                 startXrayCore(configJson)
             }
 
-        } catch (e: Exception) {
-            Log.e(TAG, "startTunnel failed", e)
-            MainActivity.notifyStateChange("error", "Gagal konek: ${e.message}")
+        } catch (t: Throwable) {
+            Log.e(TAG, "startTunnel failed", t)
+            MainActivity.notifyStateChange("error", "Gagal konek: ${t.message ?: t.javaClass.simpleName}")
             stopTunnel()
         }
     }
@@ -159,10 +159,18 @@ misc:
                 false
             }
             Log.i(TAG, "hev-socks5-tunnel started=$hevStarted")
+            if (!hevStarted) {
+                MainActivity.notifyStateChange("error", "Tunnel TProxy gagal dimulai pada perangkat ini")
+                try { vpnInterface?.close() } catch (_: Throwable) {}
+                vpnInterface = null
+                return false
+            }
             true
-        } catch (e: Exception) {
-            Log.e(TAG, "establishTun error", e)
-            MainActivity.notifyStateChange("error", "Gagal membuat interface VPN: ${e.message}")
+        } catch (t: Throwable) {
+            Log.e(TAG, "establishTun error", t)
+            MainActivity.notifyStateChange("error", "Gagal membuat interface VPN: ${t.message ?: t.javaClass.simpleName}")
+            try { vpnInterface?.close() } catch (_: Throwable) {}
+            vpnInterface = null
             false
         }
     }
