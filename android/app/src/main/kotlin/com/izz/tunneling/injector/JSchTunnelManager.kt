@@ -46,14 +46,32 @@ class JSchTunnelManager(
     private var workerThread: Thread? = null
     private var socksServer: ServerSocket? = null
     private val isRunning = AtomicBoolean(false)
+    private val errorReported = AtomicBoolean(false)
+
+    private fun reportLog(message: String) {
+        try { onLog(message) } catch (t: Throwable) { Log.w(TAG, "log callback failed", t) }
+    }
+
+    private fun reportConnected() {
+        try { onConnected() } catch (t: Throwable) { Log.e(TAG, "connected callback failed", t) }
+    }
+
+    private fun reportError(message: String) {
+        if (!errorReported.compareAndSet(false, true)) return
+        try { onError(message.take(240)) } catch (t: Throwable) { Log.e(TAG, "error callback failed", t) }
+    }
 
     fun start() {
-        if (isRunning.get()) return
-        isRunning.set(true)
+        if (!isRunning.compareAndSet(false, true)) return
+        errorReported.set(false)
 
         workerThread = Thread {
             try {
-                onLog("Inisialisasi SSH Engine (HTTP Custom JSch Core)...")
+                if (host.isBlank() || user.isBlank() || pass.isBlank() || port !in 1..65535) {
+                    reportError("Data SSH tidak lengkap atau port tidak valid")
+                    return@Thread
+                }
+                reportLog("Inisialisasi SSH Engine (HTTP Custom JSch Core)...")
                 val jsch = JSch()
 
                 val socketFactory = object : SocketFactory {
@@ -67,11 +85,11 @@ class JSchTunnelManager(
                             val parts = remoteProxy.split(":")
                             targetHost = parts[0].trim()
                             targetPort = if (parts.size > 1) parts[1].trim().toIntOrNull() ?: 8080 else 8080
-                            onLog("Menghubungkan ke Remote Proxy $targetHost:$targetPort...")
+                            reportLog("Menghubungkan ke Remote Proxy $targetHost:$targetPort...")
                         } else {
                             targetHost = host
                             targetPort = port
-                            onLog("Menghubungkan ke $targetHost:$targetPort...")
+                            reportLog("Menghubungkan ke $targetHost:$targetPort...")
                         }
 
                         var s = Socket()
@@ -82,7 +100,7 @@ class JSchTunnelManager(
 
                         if (enableSsl) {
                             val sniHost = if (sni.isNotBlank()) sni.trim() else host.trim()
-                            onLog("Melakukan SSL Handshake (SNI: $sniHost)...")
+                            reportLog("Melakukan SSL Handshake (SNI: $sniHost)...")
 
                             val trustAll = arrayOf<TrustManager>(object : X509TrustManager {
                                 override fun getAcceptedIssuers(): Array<X509Certificate>? = null
@@ -101,7 +119,7 @@ class JSchTunnelManager(
                             }
                             sslSocket.startHandshake()
                             s = sslSocket
-                            onLog("SSL Handshake Berhasil!")
+                            reportLog("SSL Handshake Berhasil!")
                         }
 
                         if (enablePayload) {
@@ -121,7 +139,7 @@ class JSchTunnelManager(
                                 .replace("[ua]", "okhttp/4.9.0", ignoreCase = true)
                                 .replace("[protocol]", "HTTP/1.1", ignoreCase = true)
 
-                            onLog("Mengirim HTTP Payload...")
+                            reportLog("Mengirim HTTP Payload...")
                             val out = s.getOutputStream()
                             out.write(finalPayload.toByteArray(Charsets.UTF_8))
                             out.flush()
@@ -138,7 +156,7 @@ class JSchTunnelManager(
                                 if (headerBuf.length > 8192) break
                             }
                             val firstLine = headerBuf.lines().firstOrNull()?.trim() ?: "HTTP/1.1 200 OK"
-                            onLog("Status Respon HTTP: $firstLine")
+                            reportLog("Status Respon HTTP: $firstLine")
                         }
 
                         currentSocket = s
@@ -159,17 +177,17 @@ class JSchTunnelManager(
                 sess.setConfig(config)
                 sess.timeout = 20000
 
-                onLog("Melakukan Otentikasi SSH untuk '$user'...")
+                reportLog("Melakukan Otentikasi SSH untuk '$user'...")
                 sess.connect(20000)
 
-                onLog("SSH Terotentikasi! Server Banner: ${sess.serverVersion}")
+                reportLog("SSH Terotentikasi! Server Banner: ${sess.serverVersion}")
                 session = sess
 
                 // Start In-Process SOCKS5 Proxy Server on 127.0.0.1:10808
                 startSocks5Server(sess)
 
-                onLog("SOCKS5 Proxy Siap pada 127.0.0.1:$LOCAL_SOCKS_PORT!")
-                onConnected()
+                reportLog("SOCKS5 Proxy Siap pada 127.0.0.1:$LOCAL_SOCKS_PORT!")
+                reportConnected()
 
                 // Keep session alive
                 while (isRunning.get() && sess.isConnected) {
@@ -177,14 +195,19 @@ class JSchTunnelManager(
                 }
 
                 if (isRunning.get() && !sess.isConnected) {
-                    onError("Koneksi SSH terputus.")
+                    reportError("Koneksi SSH terputus.")
                 }
 
-            } catch (e: Exception) {
-                Log.e(TAG, "SSH Connection error", e)
-                val msg = e.message ?: e.toString()
-                onLog("SSH Error: $msg")
-                onError("Gagal konek SSH: $msg")
+            } catch (t: Throwable) {
+                Log.e(TAG, "SSH Connection error", t)
+                val msg = t.message ?: t.javaClass.simpleName
+                reportLog("SSH Error: $msg")
+                reportError("Gagal konek SSH: $msg")
+            } finally {
+                try { socksServer?.close() } catch (_: Throwable) {}
+                try { session?.disconnect() } catch (_: Throwable) {}
+                session = null
+                isRunning.set(false)
             }
         }.apply {
             name = "jsch-worker"

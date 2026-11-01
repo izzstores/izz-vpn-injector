@@ -103,35 +103,33 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
     _vpnStateSub = VpnService.stateStream.listen((state) {
       if (!mounted) return;
-      setState(() {
-        _vpnState = state;
-        if (state == VpnState.connected) {
-          _connectionWasEstablished = true;
-          _reconnectScheduled = false;
-          _addLog("Status: CONNECTED! Tunnel interface active.");
-          _startDurationTimer();
-        } else if (state == VpnState.connecting) {
-          _addLog("Status: Connecting to remote endpoint...");
-        } else if (state == VpnState.authenticating) {
-          _addLog("Status: Handshaking & Authenticating...");
-        } else if (state == VpnState.error) {
-          final errMsg = VpnService.lastErrorMessage;
-          if (errMsg != null && errMsg.isNotEmpty) {
-            _addLog("Status: ERROR - $errMsg");
-          } else {
-            _addLog("Status: ERROR - Connection aborted or timed out.");
-          }
-          _stopDurationTimer();
-          _scheduleReconnectIfNeeded();
-        } else {
-          _addLog("Status: Disconnected.");
-          _stopDurationTimer();
-          _scheduleReconnectIfNeeded();
-        }
-      });
+      final wasEstablished = _connectionWasEstablished;
+      setState(() => _vpnState = state);
+      if (state == VpnState.connected) {
+        _connectionWasEstablished = true;
+        _reconnectScheduled = false;
+        _addLog("Status: CONNECTED! Tunnel interface active.");
+        _startDurationTimer();
+      } else if (state == VpnState.connecting) {
+        _addLog("Status: Connecting to remote endpoint...");
+      } else if (state == VpnState.authenticating) {
+        _addLog("Status: Handshaking & Authenticating...");
+      } else if (state == VpnState.error) {
+        final errMsg = VpnService.lastErrorMessage;
+        _addLog(errMsg != null && errMsg.isNotEmpty
+            ? "Status: ERROR - $errMsg"
+            : "Status: ERROR - Connection aborted or timed out.");
+        _stopDurationTimer();
+        if (wasEstablished) _scheduleReconnectIfNeeded();
+      } else {
+        _addLog("Status: Disconnected.");
+        _stopDurationTimer();
+        if (wasEstablished) _scheduleReconnectIfNeeded();
+      }
     });
 
     _vpnStatsSub = VpnService.statsStream.listen((stats) {
+      if (!mounted) return;
       setState(() {
         _ping = "${stats['ping_ms'] ?? '--'} ms";
         _download = "${stats['down_speed'] ?? '0 KB/s'}";

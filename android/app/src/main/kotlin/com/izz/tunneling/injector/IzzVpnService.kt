@@ -192,8 +192,11 @@ misc:
             onLog = { msg -> MainActivity.notifyStateChange("connecting", msg) },
             onConnected = { markConnected() },
             onError = { err ->
-                MainActivity.notifyStateChange("error", err)
-                stopTunnel()
+                if (!stopRequested.get()) {
+                    failureReported = true
+                    MainActivity.notifyStateChange("error", err)
+                    stopTunnel()
+                }
             }
         )
         jschManager = manager
