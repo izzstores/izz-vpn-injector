@@ -10,6 +10,9 @@ jobs:
   legacy-hev:
     name: Build experimental Android 8/9 HEV APK
     runs-on: ubuntu-latest
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
     steps:
       - name: Checkout application
         uses: actions/checkout@v4
@@ -29,9 +32,13 @@ jobs:
 
       - name: Install Android 35 and NDK
         run: |
-          command -v sdkmanager
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          find "$ANDROID_HOME" -type f \( -name sdkmanager -o -name ndk-build \) -print 2>/dev/null | head -20
+          SDKMANAGER=$(find "$ANDROID_HOME" -type f -name sdkmanager -print -quit)
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"
+          test -x "$ANDROID_HOME/ndk/27.2.12479018/ndk-build" || test -x "$ANDROID_HOME/ndk-bundle/ndk-build"
 
       - name: Build HEV from source with API 26
         run: |
