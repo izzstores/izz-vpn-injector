@@ -58,7 +58,14 @@ class IzzVpnService : VpnService() {
                 stopTunnel()
                 return START_NOT_STICKY
             }
-            ACTION_START -> startTunnel(intent.getStringExtra("CONFIG_JSON") ?: "")
+            ACTION_START -> {
+                val config = intent.getStringExtra("CONFIG_JSON") ?: ""
+                Thread { startTunnel(config) }.apply {
+                    name = "vpn-startup"
+                    isDaemon = true
+                    start()
+                }
+            }
         }
         return START_STICKY
     }
@@ -110,6 +117,18 @@ class IzzVpnService : VpnService() {
     /** TUN Android + hev-socks5-tunnel -> SOCKS5 127.0.0.1:10808 */
     private fun establishTun(): Boolean {
         return try {
+            // The bundled HEV AAR declares minSdk 29. Do not enter its native
+            // code on older Android versions; that can terminate the process
+            // with a native linker/SIGSEGV before Kotlin can catch it.
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                val api = Build.VERSION.SDK_INT
+                Log.e(TAG, "HEV tunnel requires Android API 29+, device API=$api")
+                MainActivity.notifyStateChange(
+                    "error",
+                    "Perangkat ini Android API $api; engine tunnel memerlukan Android 10/API 29 atau lebih baru"
+                )
+                return false
+            }
             updateNotification("Membuat interface VPN...")
 
             val prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
