@@ -59,6 +59,20 @@ jobs:
           unzip -p android/app/libs/hev-socks5-tunnel-legacy.aar AndroidManifest.xml
           file /tmp/hev/libs/*/libhev-socks5-tunnel.so
 
+      - name: Add official Xray ARM binaries
+        run: |
+          rm -rf android/app/src/main/jniLibs
+          mkdir -p android/app/src/main/jniLibs/arm64-v8a android/app/src/main/jniLibs/armeabi-v7a
+          XRAY_VERSION="v26.10.31"
+          curl -fsSL --retry 3 "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/Xray-android-arm64-v8a.zip" -o /tmp/xray64.zip
+          unzip -oq /tmp/xray64.zip xray -d /tmp/xray64
+          mv /tmp/xray64/xray android/app/src/main/jniLibs/arm64-v8a/libxray.so
+          curl -fsSL --retry 3 "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/Xray-linux-arm32-v7a.zip" -o /tmp/xray32.zip
+          unzip -oq /tmp/xray32.zip xray -d /tmp/xray32
+          mv /tmp/xray32/xray android/app/src/main/jniLibs/armeabi-v7a/libxray.so
+          chmod 755 android/app/src/main/jniLibs/*/libxray.so
+          file android/app/src/main/jniLibs/*/libxray.so
+
       - name: Use experimental AAR and enable legacy path for test only
         run: |
           mv android/app/libs/hev-socks5-tunnel.aar android/app/libs/hev-socks5-tunnel-upstream.aar
@@ -74,7 +88,7 @@ jobs:
           test -f build/app/outputs/flutter-apk/app-release.apk
           AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)
           "$AAPT" dump badging build/app/outputs/flutter-apk/app-release.apk | grep "targetSdkVersion:'35'"
-          unzip -l build/app/outputs/flutter-apk/app-release.apk | grep -E 'lib/(armeabi-v7a|arm64-v8a)/libhev-socks5-tunnel.so'
+          unzip -l build/app/outputs/flutter-apk/app-release.apk | grep -E 'lib/(armeabi-v7a|arm64-v8a)/lib(hev-socks5-tunnel|xray)\.so'
 
       - name: Upload experimental APK
         uses: actions/upload-artifact@v4
