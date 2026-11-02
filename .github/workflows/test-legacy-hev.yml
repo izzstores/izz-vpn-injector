@@ -27,11 +27,10 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Setup Android SDK and NDK
-        uses: android-actions/setup-android@v3
-
       - name: Install Android 35 and NDK
         run: |
+          command -v sdkmanager
+          yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"
 
       - name: Build HEV from source with API 26
