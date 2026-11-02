@@ -7,6 +7,8 @@ import com.jcraft.jsch.ChannelDirectTCPIP
 import com.jcraft.jsch.JSch
 import com.jcraft.jsch.Session
 import com.jcraft.jsch.SocketFactory
+import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.InputStream
@@ -98,6 +100,8 @@ class JSchTunnelManager(
                             throw IllegalArgumentException("Remote proxy/host atau port tidak valid")
                         }
                         s.tcpNoDelay = true
+                        s.receiveBufferSize = 256 * 1024
+                        s.sendBufferSize = 256 * 1024
                         s.soTimeout = 20000
                         if (!vpnService.protect(s)) {
                             throw IllegalStateException("Socket SSH gagal diproteksi dari VPN")
@@ -327,30 +331,30 @@ class JSchTunnelManager(
             dos.flush()
 
             // 4. Bi-directional stream forwarding
-            val clientIn = client.getInputStream()
-            val clientOut = client.getOutputStream()
-            val sshIn = ch.inputStream
-            val sshOut = ch.outputStream
+            val clientIn = BufferedInputStream(client.getInputStream(), 64 * 1024)
+            val clientOut = BufferedOutputStream(client.getOutputStream(), 64 * 1024)
+            val sshIn = BufferedInputStream(ch.inputStream, 64 * 1024)
+            val sshOut = BufferedOutputStream(ch.outputStream, 64 * 1024)
 
             val t1 = Thread {
                 try {
-                    val buf = ByteArray(16384)
-                    var len = 0
+                    val buf = ByteArray(32 * 1024)
+                    var len: Int
                     while (isRunning.get() && clientIn.read(buf).also { len = it } != -1) {
                         sshOut.write(buf, 0, len)
-                        sshOut.flush()
                     }
+                    sshOut.flush()
                 } catch (_: Exception) {}
             }
 
             val t2 = Thread {
                 try {
-                    val buf = ByteArray(16384)
-                    var len = 0
+                    val buf = ByteArray(32 * 1024)
+                    var len: Int
                     while (isRunning.get() && sshIn.read(buf).also { len = it } != -1) {
                         clientOut.write(buf, 0, len)
-                        clientOut.flush()
                     }
+                    clientOut.flush()
                 } catch (_: Exception) {}
             }
 
