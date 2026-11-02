@@ -339,8 +339,9 @@ class JSchTunnelManager(
             val t1 = Thread {
                 try {
                     val buf = ByteArray(32 * 1024)
-                    var len: Int
-                    while (isRunning.get() && clientIn.read(buf).also { len = it } != -1) {
+                    while (isRunning.get()) {
+                        val len = clientIn.read(buf)
+                        if (len == -1) break
                         sshOut.write(buf, 0, len)
                     }
                     sshOut.flush()
@@ -350,8 +351,9 @@ class JSchTunnelManager(
             val t2 = Thread {
                 try {
                     val buf = ByteArray(32 * 1024)
-                    var len: Int
-                    while (isRunning.get() && sshIn.read(buf).also { len = it } != -1) {
+                    while (isRunning.get()) {
+                        val len = sshIn.read(buf)
+                        if (len == -1) break
                         clientOut.write(buf, 0, len)
                     }
                     clientOut.flush()
