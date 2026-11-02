@@ -94,8 +94,14 @@ class JSchTunnelManager(
 
                         var s = Socket()
                         // Critical: Protect socket so it bypasses VPN interface
-                        vpnService.protect(s)
+                        if (targetHost.isBlank() || targetPort !in 1..65535) {
+                            throw IllegalArgumentException("Remote proxy/host atau port tidak valid")
+                        }
                         s.tcpNoDelay = true
+                        s.soTimeout = 20000
+                        if (!vpnService.protect(s)) {
+                            throw IllegalStateException("Socket SSH gagal diproteksi dari VPN")
+                        }
                         s.connect(InetSocketAddress(targetHost, targetPort), 15000)
 
                         if (enableSsl) {
@@ -129,20 +135,30 @@ class JSchTunnelManager(
                                 finalPayload = "GET / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf]User-Agent: [ua][crlf][crlf]"
                             }
 
+                            val splitToken = Regex("\\[(split|instant_split|delay_split)\\]", RegexOption.IGNORE_CASE)
+                            val delaySplit = Regex("\\[delay_split\\]", RegexOption.IGNORE_CASE).containsMatchIn(finalPayload)
                             finalPayload = finalPayload
                                 .replace("[crlf]", "\r\n", ignoreCase = true)
+                                .replace("[lfcr]", "\n\r", ignoreCase = true)
                                 .replace("[lf]", "\n", ignoreCase = true)
                                 .replace("[cr]", "\r", ignoreCase = true)
                                 .replace("[host_port]", "$host:$port", ignoreCase = true)
+                                .replace("[ssh]", "$host:$port", ignoreCase = true)
+                                .replace("[netData]", "CONNECT $host:$port HTTP/1.1", ignoreCase = true)
                                 .replace("[host]", sniHost, ignoreCase = true)
                                 .replace("[port]", port.toString(), ignoreCase = true)
                                 .replace("[ua]", "okhttp/4.9.0", ignoreCase = true)
                                 .replace("[protocol]", "HTTP/1.1", ignoreCase = true)
+                                .replace(Regex("\\[(raw|real_raw)\\]", RegexOption.IGNORE_CASE), "")
 
                             reportLog("Mengirim HTTP Payload...")
                             val out = s.getOutputStream()
-                            out.write(finalPayload.toByteArray(Charsets.UTF_8))
-                            out.flush()
+                            val payloadParts = finalPayload.split(splitToken)
+                            payloadParts.forEachIndexed { index, part ->
+                                if (part.isNotEmpty()) out.write(part.toByteArray(Charsets.UTF_8))
+                                out.flush()
+                                if (delaySplit && index < payloadParts.lastIndex) Thread.sleep(200)
+                            }
 
                             // Read HTTP response header until \r\n\r\n or \n\n
                             val `in` = s.getInputStream()

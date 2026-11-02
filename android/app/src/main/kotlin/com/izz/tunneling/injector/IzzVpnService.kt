@@ -29,6 +29,7 @@ class IzzVpnService : VpnService() {
     private var statsThread: Thread? = null
     private var jschManager: JSchTunnelManager? = null
     private var hevStarted = false
+    private val startInProgress = AtomicBoolean(false)
     @Volatile private var singBoxLastLog = ""
     @Volatile private var failureReported = false
     @Volatile private var xrayTrafficSeen = false
@@ -63,7 +64,10 @@ class IzzVpnService : VpnService() {
     }
 
     private fun startTunnel(configJson: String) {
-        if (isRunning) return
+        if (isRunning || !startInProgress.compareAndSet(false, true)) {
+            MainActivity.notifyStateChange("error", "Koneksi masih berjalan atau sedang dimulai")
+            return
+        }
         stopRequested.set(false)
         failureReported = false
         xrayTrafficSeen = false
@@ -260,6 +264,7 @@ misc:
 
     private fun markConnected() {
         if (stopRequested.get()) return
+        startInProgress.set(false)
         isRunning = true
         updateNotification("Izz Tunnel - Terhubung")
         MainActivity.notifyStateChange("connected", null)
@@ -410,6 +415,7 @@ misc:
         } catch (_: Exception) {}
         vpnInterface = null
 
+        startInProgress.set(false)
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
         if (!failureReported) {
