@@ -46,7 +46,7 @@ jobs:
           git clone --depth 1 --recurse-submodules https://github.com/heiher/hev-socks5-tunnel.git /tmp/hev
           sed -i 's/^APP_PLATFORM := .*/APP_PLATFORM := android-26/' /tmp/hev/Application.mk
           sed -i 's/^APP_ABI := .*/APP_ABI := armeabi-v7a arm64-v8a/' /tmp/hev/Application.mk
-          "$ANDROID_HOME/ndk/27.2.12479018/ndk-build" -C /tmp/hev NDK_PROJECT_PATH=/tmp/hev NDK_APPLICATION_MK=/tmp/hev/Application.mk
+          "$ANDROID_HOME/ndk/27.2.12479018/ndk-build" -C /tmp/hev NDK_PROJECT_PATH=/tmp/hev APP_BUILD_SCRIPT=/tmp/hev/Android.mk NDK_APPLICATION_MK=/tmp/hev/Application.mk
           test -s /tmp/hev/libs/armeabi-v7a/libhev-socks5-tunnel.so
           test -s /tmp/hev/libs/arm64-v8a/libhev-socks5-tunnel.so
           mkdir -p /tmp/hev-aar/jni/armeabi-v7a /tmp/hev-aar/jni/arm64-v8a
