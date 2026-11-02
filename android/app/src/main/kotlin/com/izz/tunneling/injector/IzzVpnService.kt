@@ -135,9 +135,14 @@ class IzzVpnService : VpnService() {
             val primaryDns = prefs.getString("flutter.custom_dns_primary", "1.1.1.1") ?: "1.1.1.1"
             val secondaryDns = prefs.getString("flutter.custom_dns_secondary", "1.0.0.1") ?: "1.0.0.1"
             Log.i(TAG, "Using configured DNS: $primaryDns, $secondaryDns")
+            val legacyAndroid = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+            // Older Android/ROM combinations are more reliable with a smaller
+            // TUN MTU and HEV's TCP UDP-relay fallback.
+            val tunMtu = if (legacyAndroid) 1400 else 1500
+            val udpMode = if (legacyAndroid) "tcp" else "udp"
             val builder = Builder()
                 .setSession("Izz Tunnel")
-                .setMtu(1500)
+                .setMtu(tunMtu)
                 .addAddress("172.19.0.1", 30)
                 .addDnsServer(primaryDns)
                 .addDnsServer(secondaryDns)
@@ -162,16 +167,22 @@ class IzzVpnService : VpnService() {
             hevConfigFile.writeText(
                 """
 tunnel:
-  mtu: 1500
+  mtu: $tunMtu
   ipv4: 172.19.0.1
 
 socks5:
   port: $LOCAL_PROXY_PORT
   address: 127.0.0.1
-  udp: 'udp'
+  udp: '$udpMode'
 
 misc:
-  log-level: warn
+  log-file: ${File(filesDir, "hev.log").absolutePath}
+  log-level: info
+  tcp-buffer-size: 65536
+  udp-recv-buffer-size: 262144
+  connect-timeout: 15000
+  tcp-read-write-timeout: 300000
+  udp-read-write-timeout: 60000
 """.trimIndent()
             )
 
@@ -181,8 +192,14 @@ misc:
                 Log.e(TAG, "TProxyStartService error", e)
                 false
             }
-            Log.i(TAG, "hev-socks5-tunnel started=$hevStarted")
-            if (!hevStarted) {
+            val hevRunning = try {
+                TProxyService.TProxyIsRunning()
+            } catch (t: Throwable) {
+                Log.e(TAG, "TProxyIsRunning check failed", t)
+                false
+            }
+            Log.i(TAG, "hev-socks5-tunnel started=$hevStarted running=$hevRunning mtu=$tunMtu udp=$udpMode")
+            if (!hevStarted || !hevRunning) {
                 MainActivity.notifyStateChange("error", "Tunnel TProxy gagal dimulai pada perangkat ini")
                 try { vpnInterface?.close() } catch (_: Throwable) {}
                 vpnInterface = null
