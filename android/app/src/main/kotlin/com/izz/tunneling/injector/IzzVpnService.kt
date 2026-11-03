@@ -95,14 +95,28 @@ class IzzVpnService : VpnService() {
             val first = if (outbounds != null && outbounds.length() > 0) outbounds.getJSONObject(0) else null
             val isSsh = first?.optString("type") == "ssh"
 
-            // TUN Android + hev-socks5-tunnel dibangun lebih dulu (pola V2RayNG / HTTP Injector)
+            if (isSsh && first != null) {
+                // SSH must expose the local SOCKS backend before HEV starts.
+                // Starting TUN first can make legacy HEV accept packets while
+                // 127.0.0.1:10808 is not listening yet, causing connected-without-internet.
+                startSshInjector(first)
+                if (!waitForLocalPort(LOCAL_PROXY_PORT, 15000)) {
+                    failureReported = true
+                    MainActivity.notifyStateChange("error", "SOCKS SSH tidak siap; tunnel tidak dilanjutkan")
+                    stopTunnel()
+                    return
+                }
+                MainActivity.notifyStateChange("connecting", "SOCKS SSH siap, membuat interface VPN...")
+            }
+
             if (!establishTun()) {
                 stopTunnel()
                 return
             }
 
-            if (isSsh && first != null) {
-                startSshInjector(first)
+            if (isSsh) {
+                // Both SSH SOCKS and HEV/TUN are ready now.
+                markConnected()
             } else {
                 startXrayCore(configJson)
             }
