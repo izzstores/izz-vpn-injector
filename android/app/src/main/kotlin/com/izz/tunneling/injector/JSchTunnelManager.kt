@@ -416,7 +416,9 @@ class JSchTunnelManager(
                 val destinationPort = ((buffer[index].toInt() and 0xff) shl 8) or (buffer[index + 1].toInt() and 0xff)
                 index += 2
                 if (destinationPort != 53 || index > length) continue
-                val response = dnsOverSshTcp(sshSession, host, buffer.copyOfRange(index, length)) ?: continue
+                // MapDNS uses a synthetic resolver address; resolve through a public DNS server remotely.
+                val upstreamDns = if (host == "198.18.0.2") "1.1.1.1" else host
+                val response = dnsOverSshTcp(sshSession, upstreamDns, buffer.copyOfRange(index, length)) ?: continue
                 val header = buffer.copyOfRange(0, index)
                 val reply = ByteArray(header.size + response.size)
                 System.arraycopy(header, 0, reply, 0, header.size)

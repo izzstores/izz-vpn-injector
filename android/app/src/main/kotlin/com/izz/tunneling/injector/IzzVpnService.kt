@@ -260,7 +260,8 @@ misc:
             enableProxy = first.optBoolean("_enable_proxy", false),
             remoteProxy = first.optString("_remote_proxy", ""),
             onLog = { msg -> MainActivity.notifyStateChange("connecting", msg) },
-            onConnected = { markConnected() },
+            // SOCKS readiness is not tunnel readiness. The caller marks connected only after TUN/HEV starts.
+            onConnected = { MainActivity.notifyStateChange("connecting", "SSH SOCKS siap") },
             onError = { err ->
                 if (!stopRequested.get()) {
                     failureReported = true
