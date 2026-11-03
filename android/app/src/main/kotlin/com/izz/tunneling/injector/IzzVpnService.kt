@@ -134,19 +134,33 @@ class IzzVpnService : VpnService() {
             val prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
             val primaryDns = prefs.getString("flutter.custom_dns_primary", "1.1.1.1") ?: "1.1.1.1"
             val secondaryDns = prefs.getString("flutter.custom_dns_secondary", "1.0.0.1") ?: "1.0.0.1"
-            Log.i(TAG, "Using configured DNS: $primaryDns, $secondaryDns")
             val legacyAndroid = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
-            // Older Android/ROM combinations are more reliable with a smaller
-            // TUN MTU and HEV's TCP UDP-relay fallback.
+            // Legacy HEV uses mapped DNS so domain connections can travel through
+            // the CONNECT-only SSH SOCKS server without UDP ASSOCIATE.
+            val vpnDns = if (legacyAndroid) "198.18.0.2" else primaryDns
+            Log.i(TAG, "Using configured DNS: $primaryDns, $secondaryDns; VPN DNS=$vpnDns")
             val tunMtu = if (legacyAndroid) 1400 else 1500
-            val udpMode = if (legacyAndroid) "tcp" else "udp"
+            // The in-process SSH SOCKS server is RFC CONNECT-only. HEV's TCP
+            // relay mode requires a different HEV SOCKS server, so keep UDP mode
+            // standard and use mapped DNS for legacy domain lookups.
+            val udpMode = "udp"
+            val mapDnsConfig = if (legacyAndroid) """
+mapdns:
+  address: 198.18.0.2
+  port: 53
+  network: 100.64.0.0
+  netmask: 255.192.0.0
+  cache-size: 10000
+""".trimIndent() else ""
             val builder = Builder()
                 .setSession("Izz Tunnel")
                 .setMtu(tunMtu)
                 .addAddress("172.19.0.1", 30)
-                .addDnsServer(primaryDns)
-                .addDnsServer(secondaryDns)
+                .addDnsServer(vpnDns)
                 .addRoute("0.0.0.0", 0)
+            if (!legacyAndroid) {
+                builder.addDnsServer(secondaryDns)
+            }
 
             try {
                 builder.addDisallowedApplication(packageName)
@@ -174,6 +188,8 @@ socks5:
   port: $LOCAL_PROXY_PORT
   address: 127.0.0.1
   udp: '$udpMode'
+
+$mapDnsConfig
 
 misc:
   log-file: ${File(filesDir, "hev.log").absolutePath}
