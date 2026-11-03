@@ -120,7 +120,7 @@ class IzzVpnService : VpnService() {
                 val manager = jschManager
                 if (manager == null || !manager.probeInternet()) {
                     failureReported = true
-                    MainActivity.notifyStateChange("error", "Internet probe gagal: SSH/TUN tidak meneruskan trafik")
+                    MainActivity.notifyStateChange("error", "${manager?.probeFailureReason() ?: "Internet probe gagal"}")
                     stopTunnel()
                     return
                 }

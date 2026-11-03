@@ -51,6 +51,15 @@ class JSchTunnelManager(
     private var socksServer: ServerSocket? = null
     private val isRunning = AtomicBoolean(false)
     private val errorReported = AtomicBoolean(false)
+    @Volatile private var lastProbeFailure = "belum ada hasil probe"
+
+    fun probeFailureReason(): String = lastProbeFailure
+
+    private fun probeFailure(message: String): Boolean {
+        lastProbeFailure = message
+        reportLog(message)
+        return false
+    }
 
     private fun reportLog(message: String) {
         try { onLog(message) } catch (t: Throwable) { Log.w(TAG, "log callback failed", t) }
@@ -479,8 +488,7 @@ class JSchTunnelManager(
             Socket().use { client ->
                 // The probe must bypass the VPN or Android can route it back into TUN.
                 if (!vpnService.protect(client)) {
-                    reportLog("Probe $target: socket gagal diproteksi dari VPN")
-                    return false
+                    return probeFailure("Probe $target: socket gagal diproteksi dari VPN")
                 }
                 client.soTimeout = timeoutMs
                 client.connect(InetSocketAddress("127.0.0.1", LOCAL_SOCKS_PORT), timeoutMs)
@@ -491,16 +499,23 @@ class JSchTunnelManager(
                 val version = input.readUnsignedByte()
                 val method = input.readUnsignedByte()
                 if (version != 5 || method != 0) {
-                    reportLog("Probe $target: SOCKS handshake gagal (v=$version method=$method)")
-                    return false
+                    return probeFailure("Probe $target: SOCKS handshake gagal (v=$version method=$method)")
                 }
-                val hostBytes = target.toByteArray(Charsets.US_ASCII)
+                val ipv4 = target.split('.').takeIf { it.size == 4 }?.mapNotNull { it.toIntOrNull() }
+                    ?.takeIf { it.size == 4 && it.all { octet -> octet in 0..255 } }
                 output.writeByte(5)
                 output.writeByte(1)
                 output.writeByte(0)
-                output.writeByte(3)
-                output.writeByte(hostBytes.size)
-                output.write(hostBytes)
+                if (ipv4 != null) {
+                    // Send a true IPv4 SOCKS request; this avoids a DNS lookup on the probe path.
+                    output.writeByte(1)
+                    ipv4.forEach { output.writeByte(it) }
+                } else {
+                    val hostBytes = target.toByteArray(Charsets.US_ASCII)
+                    output.writeByte(3)
+                    output.writeByte(hostBytes.size)
+                    output.write(hostBytes)
+                }
                 output.writeShort(port)
                 output.flush()
                 val responseVersion = input.readUnsignedByte()
@@ -512,28 +527,24 @@ class JSchTunnelManager(
                     3 -> repeat(input.readUnsignedByte()) { input.readUnsignedByte() }
                     4 -> repeat(16) { input.readUnsignedByte() }
                     else -> {
-                        reportLog("Probe $target: SOCKS reply address type tidak valid ($atyp)")
-                        return false
+                        return probeFailure("Probe $target: SOCKS reply address type tidak valid ($atyp)")
                     }
                 }
                 input.readUnsignedShort()
                 if (responseVersion != 5 || reply != 0) {
-                    reportLog("Probe $target: SOCKS CONNECT ditolak (reply=$reply)")
-                    return false
+                    return probeFailure("Probe $target: SOCKS CONNECT ditolak (reply=$reply)")
                 }
                 output.write("HEAD / HTTP/1.1\\r\\nHost: $httpHost\\r\\nConnection: close\\r\\n\\r\\n".toByteArray(Charsets.US_ASCII))
                 output.flush()
                 val first = input.read()
                 if (first < 0) {
-                    reportLog("Probe $target: CONNECT sukses tetapi downstream kosong")
-                    return false
+                    return probeFailure("Probe $target: CONNECT sukses tetapi downstream kosong")
                 }
                 reportLog("Probe $target: downstream byte diterima")
                 true
             }
         } catch (t: Throwable) {
-            reportLog("Probe $target gagal: ${t.message ?: t.javaClass.simpleName}")
-            false
+            probeFailure("Probe $target gagal: ${t.message ?: t.javaClass.simpleName}")
         }
     }
 
