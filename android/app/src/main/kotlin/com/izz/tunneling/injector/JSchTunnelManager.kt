@@ -13,6 +13,8 @@ import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.InputStream
 import java.io.OutputStream
+import java.net.DatagramPacket
+import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
@@ -312,7 +314,11 @@ class JSchTunnelManager(
 
             val destPort = dis.readUnsignedShort()
 
-            if (cmd != 1) { // Only CONNECT is supported
+            if (cmd == 3) {
+                handleDnsUdpAssociate(client, dos, sshSession)
+                return
+            }
+            if (cmd != 1) {
                 dos.write(byteArrayOf(5, 7, 0, 1, 0, 0, 0, 0, 0, 0)) // Command not supported
                 dos.flush()
                 client.close()
@@ -371,6 +377,78 @@ class JSchTunnelManager(
         } finally {
             try { channel?.disconnect() } catch (_: Exception) {}
             try { client.close() } catch (_: Exception) {}
+        }
+    }
+
+    /** DNS-only SOCKS UDP ASSOCIATE: the DNS payload is sent over SSH DNS-over-TCP. */
+    private fun handleDnsUdpAssociate(control: Socket, out: DataOutputStream, sshSession: Session) {
+        val relay = DatagramSocket(InetSocketAddress("127.0.0.1", 0))
+        val relayPort = relay.localPort
+        out.write(byteArrayOf(5, 0, 0, 1, 127, 0, 0, 1, (relayPort ushr 8).toByte(), relayPort.toByte()))
+        out.flush()
+        try {
+            val buffer = ByteArray(65535)
+            while (isRunning.get() && !control.isClosed && !relay.isClosed) {
+                val packet = DatagramPacket(buffer, buffer.size)
+                relay.receive(packet)
+                val length = packet.length
+                if (length < 10 || buffer[2].toInt() != 0) continue
+                var index = 4
+                val atyp = buffer[3].toInt() and 0xff
+                val host: String
+                when (atyp) {
+                    1 -> {
+                        if (index + 4 > length) continue
+                        host = "${buffer[index].toInt() and 0xff}.${buffer[index + 1].toInt() and 0xff}." +
+                            "${buffer[index + 2].toInt() and 0xff}.${buffer[index + 3].toInt() and 0xff}"
+                        index += 4
+                    }
+                    3 -> {
+                        val hostLength = buffer[index].toInt() and 0xff
+                        index++
+                        if (hostLength <= 0 || index + hostLength > length) continue
+                        host = String(buffer, index, hostLength, Charsets.US_ASCII)
+                        index += hostLength
+                    }
+                    else -> continue
+                }
+                if (index + 2 > length) continue
+                val destinationPort = ((buffer[index].toInt() and 0xff) shl 8) or (buffer[index + 1].toInt() and 0xff)
+                index += 2
+                if (destinationPort != 53 || index > length) continue
+                val response = dnsOverSshTcp(sshSession, host, buffer.copyOfRange(index, length)) ?: continue
+                val header = buffer.copyOfRange(0, index)
+                val reply = ByteArray(header.size + response.size)
+                System.arraycopy(header, 0, reply, 0, header.size)
+                System.arraycopy(response, 0, reply, header.size, response.size)
+                relay.send(DatagramPacket(reply, reply.size, packet.address, packet.port))
+            }
+        } finally {
+            try { relay.close() } catch (_: Throwable) {}
+            try { control.close() } catch (_: Throwable) {}
+        }
+    }
+
+    private fun dnsOverSshTcp(sshSession: Session, dnsHost: String, query: ByteArray): ByteArray? {
+        var channel: ChannelDirectTCPIP? = null
+        return try {
+            if (!sshSession.isConnected || query.isEmpty() || query.size > 65535) return null
+            channel = sshSession.openChannel("direct-tcpip") as ChannelDirectTCPIP
+            channel.setHost(dnsHost)
+            channel.setPort(53)
+            channel.connect(8000)
+            val output = DataOutputStream(channel.outputStream)
+            val input = DataInputStream(channel.inputStream)
+            output.writeShort(query.size)
+            output.write(query)
+            output.flush()
+            val responseLength = input.readUnsignedShort()
+            if (responseLength <= 0) return null
+            ByteArray(responseLength).also { input.readFully(it) }
+        } catch (_: Throwable) {
+            null
+        } finally {
+            try { channel?.disconnect() } catch (_: Throwable) {}
         }
     }
 
