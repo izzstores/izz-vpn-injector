@@ -115,7 +115,15 @@ class IzzVpnService : VpnService() {
             }
 
             if (isSsh) {
-                // Both SSH SOCKS and HEV/TUN are ready now.
+                // A live SSH session and a running HEV process are not enough:
+                // require one real SOCKS CONNECT plus downstream response.
+                val manager = jschManager
+                if (manager == null || !manager.probeInternet()) {
+                    failureReported = true
+                    MainActivity.notifyStateChange("error", "Internet probe gagal: SSH/TUN tidak meneruskan trafik")
+                    stopTunnel()
+                    return
+                }
                 markConnected()
             } else {
                 startXrayCore(configJson)

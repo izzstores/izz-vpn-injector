@@ -454,6 +454,63 @@ class JSchTunnelManager(
         }
     }
 
+    /**
+     * Verifies the SSH data plane independently from TUN. This is a real SOCKS
+     * CONNECT plus downstream HTTP response, not merely an SSH handshake.
+     */
+    fun probeInternet(timeoutMs: Int = 10000): Boolean {
+        if (!isRunning.get()) return false
+        return try {
+            Socket("127.0.0.1", LOCAL_SOCKS_PORT).use { client ->
+                client.soTimeout = timeoutMs
+                val input = DataInputStream(client.getInputStream())
+                val output = DataOutputStream(client.getOutputStream())
+                output.write(byteArrayOf(5, 1, 0))
+                output.flush()
+                if (input.readUnsignedByte() != 5 || input.readUnsignedByte() != 0) {
+                    reportLog("Internet probe: SOCKS handshake gagal")
+                    return false
+                }
+                val hostBytes = "example.com".toByteArray(Charsets.US_ASCII)
+                output.writeByte(5)
+                output.writeByte(1)
+                output.writeByte(0)
+                output.writeByte(3)
+                output.writeByte(hostBytes.size)
+                output.write(hostBytes)
+                output.writeShort(80)
+                output.flush()
+                if (input.readUnsignedByte() != 5) return false
+                val reply = input.readUnsignedByte()
+                repeat(2) { input.readUnsignedByte() }
+                val atyp = input.readUnsignedByte()
+                when (atyp) {
+                    1 -> repeat(4) { input.readUnsignedByte() }
+                    3 -> repeat(input.readUnsignedByte()) { input.readUnsignedByte() }
+                    4 -> repeat(16) { input.readUnsignedByte() }
+                    else -> return false
+                }
+                input.readUnsignedShort()
+                if (reply != 0) {
+                    reportLog("Internet probe: SOCKS CONNECT gagal (reply=$reply)")
+                    return false
+                }
+                output.write("HEAD / HTTP/1.1\\r\\nHost: example.com\\r\\nConnection: close\\r\\n\\r\\n".toByteArray(Charsets.US_ASCII))
+                output.flush()
+                val first = input.read()
+                if (first < 0) {
+                    reportLog("Internet probe: tidak ada respons downstream")
+                    return false
+                }
+                reportLog("Internet probe berhasil: downstream response diterima")
+                true
+            }
+        } catch (t: Throwable) {
+            reportLog("Internet probe gagal: ${t.message ?: t.javaClass.simpleName}")
+            false
+        }
+    }
+
     fun stop() {
         isRunning.set(false)
         try {
