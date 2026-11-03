@@ -461,8 +461,15 @@ class JSchTunnelManager(
     fun probeInternet(timeoutMs: Int = 10000): Boolean {
         if (!isRunning.get()) return false
         return try {
-            Socket("127.0.0.1", LOCAL_SOCKS_PORT).use { client ->
+            Socket().use { client ->
+                // The probe itself must bypass the VPN, otherwise Android can route
+                // the probe back into TUN and create a false data-plane failure.
+                if (!vpnService.protect(client)) {
+                    reportLog("Internet probe: socket gagal diproteksi dari VPN")
+                    return false
+                }
                 client.soTimeout = timeoutMs
+                client.connect(InetSocketAddress("127.0.0.1", LOCAL_SOCKS_PORT), timeoutMs)
                 val input = DataInputStream(client.getInputStream())
                 val output = DataOutputStream(client.getOutputStream())
                 output.write(byteArrayOf(5, 1, 0))
