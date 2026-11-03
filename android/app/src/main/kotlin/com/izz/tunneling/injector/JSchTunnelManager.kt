@@ -454,18 +454,32 @@ class JSchTunnelManager(
         }
     }
 
-    /**
-     * Verifies the SSH data plane independently from TUN. This is a real SOCKS
-     * CONNECT plus downstream HTTP response, not merely an SSH handshake.
-     */
+    /** Runs separate data-plane probes so the first failing layer is visible. */
     fun probeInternet(timeoutMs: Int = 10000): Boolean {
-        if (!isRunning.get()) return false
+        if (!isRunning.get()) {
+            reportLog("Internet probe: SSH worker belum running")
+            return false
+        }
+        val literal = probeSocksTarget("1.1.1.1", 80, "one.one.one.one", timeoutMs)
+        val domain = probeSocksTarget("example.com", 80, "example.com", timeoutMs)
+        if (literal && domain) {
+            reportLog("Internet probe berhasil: literal IP dan domain menerima respons")
+            return true
+        }
+        if (literal) {
+            reportLog("Internet probe: TCP literal berhasil, tetapi DNS/domain gagal")
+        } else {
+            reportLog("Internet probe: CONNECT literal IP gagal; masalah ada di SSH direct-tcpip atau server")
+        }
+        return false
+    }
+
+    private fun probeSocksTarget(target: String, port: Int, httpHost: String, timeoutMs: Int): Boolean {
         return try {
             Socket().use { client ->
-                // The probe itself must bypass the VPN, otherwise Android can route
-                // the probe back into TUN and create a false data-plane failure.
+                // The probe must bypass the VPN or Android can route it back into TUN.
                 if (!vpnService.protect(client)) {
-                    reportLog("Internet probe: socket gagal diproteksi dari VPN")
+                    reportLog("Probe $target: socket gagal diproteksi dari VPN")
                     return false
                 }
                 client.soTimeout = timeoutMs
@@ -474,20 +488,22 @@ class JSchTunnelManager(
                 val output = DataOutputStream(client.getOutputStream())
                 output.write(byteArrayOf(5, 1, 0))
                 output.flush()
-                if (input.readUnsignedByte() != 5 || input.readUnsignedByte() != 0) {
-                    reportLog("Internet probe: SOCKS handshake gagal")
+                val version = input.readUnsignedByte()
+                val method = input.readUnsignedByte()
+                if (version != 5 || method != 0) {
+                    reportLog("Probe $target: SOCKS handshake gagal (v=$version method=$method)")
                     return false
                 }
-                val hostBytes = "example.com".toByteArray(Charsets.US_ASCII)
+                val hostBytes = target.toByteArray(Charsets.US_ASCII)
                 output.writeByte(5)
                 output.writeByte(1)
                 output.writeByte(0)
                 output.writeByte(3)
                 output.writeByte(hostBytes.size)
                 output.write(hostBytes)
-                output.writeShort(80)
+                output.writeShort(port)
                 output.flush()
-                if (input.readUnsignedByte() != 5) return false
+                val responseVersion = input.readUnsignedByte()
                 val reply = input.readUnsignedByte()
                 repeat(2) { input.readUnsignedByte() }
                 val atyp = input.readUnsignedByte()
@@ -495,25 +511,28 @@ class JSchTunnelManager(
                     1 -> repeat(4) { input.readUnsignedByte() }
                     3 -> repeat(input.readUnsignedByte()) { input.readUnsignedByte() }
                     4 -> repeat(16) { input.readUnsignedByte() }
-                    else -> return false
+                    else -> {
+                        reportLog("Probe $target: SOCKS reply address type tidak valid ($atyp)")
+                        return false
+                    }
                 }
                 input.readUnsignedShort()
-                if (reply != 0) {
-                    reportLog("Internet probe: SOCKS CONNECT gagal (reply=$reply)")
+                if (responseVersion != 5 || reply != 0) {
+                    reportLog("Probe $target: SOCKS CONNECT ditolak (reply=$reply)")
                     return false
                 }
-                output.write("HEAD / HTTP/1.1\\r\\nHost: example.com\\r\\nConnection: close\\r\\n\\r\\n".toByteArray(Charsets.US_ASCII))
+                output.write("HEAD / HTTP/1.1\\r\\nHost: $httpHost\\r\\nConnection: close\\r\\n\\r\\n".toByteArray(Charsets.US_ASCII))
                 output.flush()
                 val first = input.read()
                 if (first < 0) {
-                    reportLog("Internet probe: tidak ada respons downstream")
+                    reportLog("Probe $target: CONNECT sukses tetapi downstream kosong")
                     return false
                 }
-                reportLog("Internet probe berhasil: downstream response diterima")
+                reportLog("Probe $target: downstream byte diterima")
                 true
             }
         } catch (t: Throwable) {
-            reportLog("Internet probe gagal: ${t.message ?: t.javaClass.simpleName}")
+            reportLog("Probe $target gagal: ${t.message ?: t.javaClass.simpleName}")
             false
         }
     }
