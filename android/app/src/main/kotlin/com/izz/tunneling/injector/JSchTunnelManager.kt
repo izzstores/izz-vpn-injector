@@ -470,16 +470,18 @@ class JSchTunnelManager(
             return false
         }
         val literal = probeSocksTarget("1.1.1.1", 80, "one.one.one.one", timeoutMs)
+        if (!literal) {
+            // Do not run the domain probe after a literal-IP failure: otherwise its
+            // error would overwrite the first and most useful failure layer.
+            return false
+        }
         val domain = probeSocksTarget("example.com", 80, "example.com", timeoutMs)
-        if (literal && domain) {
+        if (domain) {
             reportLog("Internet probe berhasil: literal IP dan domain menerima respons")
             return true
         }
-        if (literal) {
-            reportLog("Internet probe: TCP literal berhasil, tetapi DNS/domain gagal")
-        } else {
-            reportLog("Internet probe: CONNECT literal IP gagal; masalah ada di SSH direct-tcpip atau server")
-        }
+        lastProbeFailure = "Probe domain gagal setelah TCP literal berhasil; periksa DNS/domain"
+        reportLog(lastProbeFailure)
         return false
     }
 
