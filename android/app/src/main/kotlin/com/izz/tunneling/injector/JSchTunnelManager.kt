@@ -47,7 +47,6 @@ class JSchTunnelManager(
     private var session: Session? = null
     private var workerThread: Thread? = null
     private var socksServer: ServerSocket? = null
-    private var dynamicForwardPort: Int? = null
     private val isRunning = AtomicBoolean(false)
     private val errorReported = AtomicBoolean(false)
 
@@ -204,12 +203,11 @@ class JSchTunnelManager(
                 reportLog("SSH Terotentikasi! Server Banner: ${sess.serverVersion}")
                 session = sess
 
-                // Use JSch's tested dynamic SOCKS5 forwarding instead of the
-                // hand-written local SOCKS server. It handles SOCKS framing and
-                // opens direct-tcpip channels through the authenticated session.
-                sess.setPortForwardingD(LOCAL_SOCKS_PORT)
-                dynamicForwardPort = LOCAL_SOCKS_PORT
-                reportLog("SOCKS5 dynamic JSch siap pada 127.0.0.1:$LOCAL_SOCKS_PORT")
+                // Local SOCKS5 bridge handles one CONNECT per SSH direct-tcpip
+                // channel. UDP is intentionally unsupported in TCP-only mode;
+                // HEV MapDNS keeps domain lookups on the CONNECT path.
+                startSocks5Server(sess)
+                reportLog("SOCKS5 TCP-only siap pada 127.0.0.1:$LOCAL_SOCKS_PORT")
                 reportConnected()
 
                 // Keep session alive
@@ -227,10 +225,6 @@ class JSchTunnelManager(
                 reportLog("SSH Error: $msg")
                 reportError("Gagal konek SSH: $msg")
             } finally {
-                try {
-                    dynamicForwardPort?.let { session?.delPortForwardingL(it) }
-                } catch (_: Throwable) {}
-                dynamicForwardPort = null
                 try { socksServer?.close() } catch (_: Throwable) {}
                 try { session?.disconnect() } catch (_: Throwable) {}
                 session = null
