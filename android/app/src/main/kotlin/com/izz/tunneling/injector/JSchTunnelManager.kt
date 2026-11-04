@@ -526,9 +526,11 @@ class JSchTunnelManager(
                 }
                 output.writeShort(port)
                 output.flush()
+                // SOCKS5 reply: VER, REP, RSV, ATYP, BND.ADDR, BND.PORT.
+                // RSV is one byte; ATYP must be read exactly once.
                 val responseVersion = input.readUnsignedByte()
                 val reply = input.readUnsignedByte()
-                repeat(2) { input.readUnsignedByte() }
+                input.readUnsignedByte() // RSV
                 val atyp = input.readUnsignedByte()
                 when (atyp) {
                     1 -> repeat(4) { input.readUnsignedByte() }
