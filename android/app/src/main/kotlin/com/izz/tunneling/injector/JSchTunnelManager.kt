@@ -489,8 +489,14 @@ class JSchTunnelManager(
         return try {
             Socket().use { client ->
                 // The probe must bypass the VPN or Android can route it back into TUN.
-                if (!vpnService.protect(client)) {
-                    return probeFailure("Probe $target: socket gagal diproteksi dari VPN")
+                // This socket only connects to the app's own loopback SOCKS listener.
+                // Some Android 8/9 builds return false for protect() on loopback even
+                // though the VPN and local listener are healthy. The SSH transport
+                // socket above remains strictly protected; do not fail this local
+                // diagnostic before it reaches the SOCKS handshake.
+                val protected = vpnService.protect(client)
+                if (!protected) {
+                    reportLog("Probe $target: protect(loopback)=false; lanjutkan uji SOCKS lokal")
                 }
                 client.soTimeout = timeoutMs
                 client.connect(InetSocketAddress("127.0.0.1", LOCAL_SOCKS_PORT), timeoutMs)
