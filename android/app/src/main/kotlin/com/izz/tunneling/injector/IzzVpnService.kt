@@ -368,16 +368,33 @@ misc:
 
             val binary = File(applicationInfo.nativeLibraryDir, "libdnstt.so")
             val executableBinary: File
-            if (!binary.exists() || !binary.canExecute()) {
+            if (binary.exists() && binary.canExecute()) {
+                executableBinary = binary
+            } else {
                 val internalBin = File(filesDir, "dnstt-client")
                 if (binary.exists()) {
                     binary.copyTo(internalBin, overwrite = true)
+                } else {
+                    // Coba extract langsung dari APK jika belum ada di nativeLibraryDir
+                    try {
+                        val zip = java.util.zip.ZipFile(applicationInfo.sourceDir)
+                        val abi = if (Build.SUPPORTED_ABIS.contains("arm64-v8a")) "arm64-v8a" else "armeabi-v7a"
+                        val entry = zip.getEntry("lib/$abi/libdnstt.so")
+                        if (entry != null) {
+                            zip.getInputStream(entry).use { input ->
+                                internalBin.outputStream().use { output -> input.copyTo(output) }
+                            }
+                        }
+                        zip.close()
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Gagal extract libdnstt.so dari APK", e)
+                    }
                 }
                 internalBin.setExecutable(true, false)
                 executableBinary = internalBin
-            } else {
-                executableBinary = binary
             }
+
+            MainActivity.notifyStateChange("connecting", "SlowDNS binary: ${executableBinary.name} (exists=${executableBinary.exists()}, canExec=${executableBinary.canExecute()}, size=${executableBinary.length()})")
 
             val cmd = arrayOf(
                 executableBinary.absolutePath,
