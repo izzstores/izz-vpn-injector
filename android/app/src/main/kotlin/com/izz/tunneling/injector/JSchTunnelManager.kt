@@ -18,6 +18,7 @@ import java.net.Socket
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.Properties
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.net.ssl.*
 
@@ -50,6 +51,7 @@ class JSchTunnelManager(
     private var workerThread: Thread? = null
     private var socksServer: ServerSocket? = null
     private val isRunning = AtomicBoolean(false)
+    private val executor = Executors.newCachedThreadPool()
 
     fun start() {
         if (isRunning.get()) return
@@ -208,12 +210,11 @@ class JSchTunnelManager(
             while (isRunning.get() && socksServer != null && !socksServer!!.isClosed) {
                 try {
                     val client = socksServer!!.accept()
-                    Thread {
+                    client.tcpNoDelay = true
+                    client.sendBufferSize = 65536
+                    client.receiveBufferSize = 65536
+                    executor.execute {
                         handleSocksClient(client, sshSession)
-                    }.apply {
-                        name = "socks5-client"
-                        isDaemon = true
-                        start()
                     }
                 } catch (e: Exception) {
                     if (!isRunning.get()) break
@@ -295,38 +296,42 @@ class JSchTunnelManager(
             dos.write(byteArrayOf(5, 0, 0, 1, 0, 0, 0, 0, 0, 0))
             dos.flush()
 
-            // 4. Bi-directional stream forwarding
+            // 4. Bi-directional stream forwarding using cached thread pool
             val clientIn = client.getInputStream()
             val clientOut = client.getOutputStream()
             val sshIn = ch.inputStream
             val sshOut = ch.outputStream
 
-            val t1 = Thread {
+            val f1 = executor.submit {
                 try {
-                    val buf = ByteArray(16384)
+                    val buf = ByteArray(32768)
                     var len = 0
                     while (isRunning.get() && clientIn.read(buf).also { len = it } != -1) {
                         sshOut.write(buf, 0, len)
-                        sshOut.flush()
+                        if (clientIn.available() == 0) {
+                            sshOut.flush()
+                        }
                     }
                 } catch (_: Exception) {}
             }
 
-            val t2 = Thread {
+            val f2 = executor.submit {
                 try {
-                    val buf = ByteArray(16384)
+                    val buf = ByteArray(32768)
                     var len = 0
                     while (isRunning.get() && sshIn.read(buf).also { len = it } != -1) {
                         clientOut.write(buf, 0, len)
-                        clientOut.flush()
+                        if (sshIn.available() == 0) {
+                            clientOut.flush()
+                        }
                     }
                 } catch (_: Exception) {}
             }
 
-            t1.start()
-            t2.start()
-            t1.join()
-            t2.join()
+            try {
+                f1.get()
+                f2.get()
+            } catch (_: Exception) {}
 
         } catch (e: Exception) {
             Log.d(TAG, "Socks client error: ${e.message}")
@@ -338,6 +343,7 @@ class JSchTunnelManager(
 
     fun stop() {
         isRunning.set(false)
+        try { executor.shutdownNow() } catch (_: Throwable) {}
         try {
             socksServer?.close()
             socksServer = null

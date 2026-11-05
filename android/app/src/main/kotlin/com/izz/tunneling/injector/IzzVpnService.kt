@@ -86,7 +86,7 @@ class IzzVpnService : VpnService() {
             val isSsh = first?.optString("type") == "ssh"
 
             // TUN Android + hev-socks5-tunnel dibangun lebih dulu (pola V2RayNG / HTTP Injector)
-            if (!establishTun()) {
+            if (!establishTun(isSsh)) {
                 stopTunnel()
                 return
             }
@@ -105,21 +105,39 @@ class IzzVpnService : VpnService() {
     }
 
     /** TUN Android + hev-socks5-tunnel -> SOCKS5 127.0.0.1:10808 */
-    private fun establishTun(): Boolean {
+    private fun establishTun(isSsh: Boolean): Boolean {
         return try {
             updateNotification("Membuat interface VPN...")
 
             val prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
             val primaryDns = prefs.getString("flutter.custom_dns_primary", "1.1.1.1") ?: "1.1.1.1"
             val secondaryDns = prefs.getString("flutter.custom_dns_secondary", "1.0.0.1") ?: "1.0.0.1"
-            Log.i(TAG, "Using configured DNS: $primaryDns, $secondaryDns")
+
+            val mapDnsYaml = if (isSsh) """
+mapdns:
+  address: 198.18.0.2
+  port: 53
+  network: 100.64.0.0
+  netmask: 255.192.0.0
+  cache-size: 10000
+""".trimIndent() else ""
+
+            val vpnDns = if (isSsh) "198.18.0.2" else primaryDns
+            Log.i(TAG, "Using DNS: vpnDns=$vpnDns isSsh=$isSsh")
+
             val builder = Builder()
                 .setSession("Izz Tunnel")
                 .setMtu(1500)
                 .addAddress("172.19.0.1", 30)
-                .addDnsServer(primaryDns)
-                .addDnsServer(secondaryDns)
+                .addDnsServer(vpnDns)
                 .addRoute("0.0.0.0", 0)
+
+            if (isSsh) {
+                builder.addRoute("198.18.0.2", 32)
+                builder.addRoute("100.64.0.0", 10)
+            } else {
+                builder.addDnsServer(secondaryDns)
+            }
 
             try {
                 builder.addDisallowedApplication(packageName)
@@ -136,6 +154,7 @@ class IzzVpnService : VpnService() {
             val tunFd = vpnInterface!!.fd
             Log.i(TAG, "TUN established fd=$tunFd")
 
+            val udpMode = if (isSsh) "tcp" else "udp"
             val hevConfigFile = File(filesDir, "hev.yml")
             hevConfigFile.writeText(
                 """
@@ -146,9 +165,12 @@ tunnel:
 socks5:
   port: $LOCAL_PROXY_PORT
   address: 127.0.0.1
-  udp: 'udp'
+  udp: '$udpMode'
+
+$mapDnsYaml
 
 misc:
+  tcp-buffer-size: 65536
   log-level: warn
 """.trimIndent()
             )
@@ -159,7 +181,7 @@ misc:
                 Log.e(TAG, "TProxyStartService error", e)
                 false
             }
-            Log.i(TAG, "hev-socks5-tunnel started=$hevStarted")
+            Log.i(TAG, "hev-socks5-tunnel started=$hevStarted (isSsh=$isSsh, mapdns=${isSsh})")
             true
         } catch (e: Exception) {
             Log.e(TAG, "establishTun error", e)
