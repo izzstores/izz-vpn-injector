@@ -24,6 +24,10 @@ class ConfigDialogs {
     required String v2rayTransport,
     required String v2rayPath,
     required String v2rayTls,
+    bool enableSlowDns = false,
+    String slowDnsNs = "",
+    String slowDnsPubkey = "",
+    String slowDnsServer = "8.8.8.8",
     required VoidCallback onSaved,
   }) async {
     final nameCtrl = TextEditingController(text: "Config_${DateFormat('ddMM').format(DateTime.now())}");
@@ -227,6 +231,10 @@ class ConfigDialogs {
                       v2rayTransport: v2rayTransport,
                       v2rayPath: v2rayPath,
                       v2rayTls: v2rayTls,
+                      enableSlowDns: enableSlowDns,
+                      slowDnsNs: slowDnsNs,
+                      slowDnsPubkey: slowDnsPubkey,
+                      slowDnsServer: slowDnsServer,
                       isLocked: lockConfig,
                       isAccountLocked: mode == "ssh" && lockAccount,
                       expiryDate: enableExpiry ? selectedExpiry : null,

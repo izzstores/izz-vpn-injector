@@ -340,6 +340,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         _enableSsl = config.sshMethod.contains("ssl") || config.port == 443;
         _enablePayload = config.payload.isNotEmpty || config.sshMethod.contains("ws");
         _enableProxy = config.remoteProxy.isNotEmpty || config.sshMethod == "http_proxy";
+        _enableSlowDns = config.enableSlowDns;
+        _slowDnsNsCtrl.text = config.slowDnsNs;
+        _slowDnsPubkeyCtrl.text = config.slowDnsPubkey;
+        _slowDnsServerCtrl.text = config.slowDnsServer.isNotEmpty ? config.slowDnsServer : "8.8.8.8";
         _sshServerCtrl.text = config.server;
         _sshPortCtrl.text = config.port.toString();
         // A locked account keeps credentials in the loaded model only.
@@ -636,6 +640,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 v2rayTransport: _v2rayTransport,
                 v2rayPath: _v2rayPathCtrl.text,
                 v2rayTls: _v2rayTls,
+                enableSlowDns: _enableSlowDns,
+                slowDnsNs: _slowDnsNsCtrl.text.trim(),
+                slowDnsPubkey: _slowDnsPubkeyCtrl.text.trim(),
+                slowDnsServer: _slowDnsServerCtrl.text.trim(),
                 onSaved: () => setState(() {}),
               );
             } else if (val == "clear") {

@@ -262,6 +262,8 @@ misc:
         var slowDnsServer = first.optString("_slowdns_server", "8.8.8.8")
         if (!slowDnsServer.contains(":")) slowDnsServer = "$slowDnsServer:53"
 
+        MainActivity.notifyStateChange("connecting", "SlowDNS enabled=$enableSlowDns, NS='$slowDnsNs', Pubkey len=${slowDnsPubkey.length}")
+
         if (enableSlowDns && slowDnsNs.isNotBlank() && slowDnsPubkey.isNotBlank()) {
             startDnsttClient(slowDnsServer, slowDnsPubkey, slowDnsNs, 7000)
         }
@@ -423,8 +425,15 @@ misc:
                 } catch (_: Throwable) {}
             }.start()
 
-            // Tunggu port 7000 terbuka sebelum JSch mencoba konek
-            for (i in 1..25) {
+            // Tunggu port terbuka dan cek apakah proses mati
+            for (i in 1..35) {
+                try {
+                    val exitVal = proc.exitValue()
+                    MainActivity.notifyStateChange("error", "SlowDNS crash (exitCode=$exitVal)")
+                    break
+                } catch (_: IllegalThreadStateException) {
+                    // proses masih berjalan normal
+                }
                 try {
                     val s = Socket()
                     s.connect(InetSocketAddress("127.0.0.1", localPort), 200)
