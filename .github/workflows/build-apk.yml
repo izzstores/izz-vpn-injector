@@ -38,6 +38,11 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
+
+      - name: Setup Go for Native DNSTT Client Core
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
           cache: 'gradle'
 
       - name: Setup Flutter SDK (Stable 3.24.4)
@@ -74,6 +79,17 @@ jobs:
           download_xray arm32 Xray-linux-arm32-v7a.zip android/app/src/main/jniLibs/armeabi-v7a/libxray.so
           chmod 755 android/app/src/main/jniLibs/*/libxray.so
           ls -lh android/app/src/main/jniLibs/*/libxray.so
+
+      - name: Build Native DNSTT Client Engine
+        run: |
+          mkdir -p /tmp/dnstt-src
+          git clone --depth=1 https://github.com/scripts-release/dnstt /tmp/dnstt-src || git clone --depth=1 https://www.bamsoftware.com/git/dnstt.git /tmp/dnstt-src
+          cd /tmp/dnstt-src/dnstt-client
+          
+          CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o $GITHUB_WORKSPACE/android/app/src/main/jniLibs/arm64-v8a/libdnstt.so .
+          CGO_ENABLED=0 GOOS=android GOARCH=arm GOARM=7 go build -trimpath -ldflags="-s -w" -o $GITHUB_WORKSPACE/android/app/src/main/jniLibs/armeabi-v7a/libdnstt.so .
+          chmod 755 $GITHUB_WORKSPACE/android/app/src/main/jniLibs/*/libdnstt.so
+          ls -lh $GITHUB_WORKSPACE/android/app/src/main/jniLibs/*/libdnstt.so
 
       - name: Build ARM Universal Android APK
         run: flutter build apk --release --obfuscate --split-debug-info=build/debug-info --tree-shake-icons

@@ -64,6 +64,10 @@ class ConfigBuilder {
     String payload = "",
     bool enableProxy = false,
     String remoteProxy = "",
+    bool enableSlowDns = false,
+    String slowDnsNs = "",
+    String slowDnsPubkey = "",
+    String slowDnsServer = "8.8.8.8",
     String? method, // legacy fallback
   }) {
     // If legacy method string was passed, map it
@@ -104,6 +108,10 @@ class ConfigBuilder {
       "_payload": payload,
       "_enable_proxy": enableProxy,
       "_remote_proxy": remoteProxy,
+      "_enable_slowdns": enableSlowDns,
+      "_slowdns_ns": slowDnsNs,
+      "_slowdns_pubkey": slowDnsPubkey,
+      "_slowdns_server": slowDnsServer,
     };
 
     return _wrapSingBox(outbounds: [

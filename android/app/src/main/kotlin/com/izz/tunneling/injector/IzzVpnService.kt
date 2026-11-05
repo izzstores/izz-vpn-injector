@@ -25,6 +25,7 @@ class IzzVpnService : VpnService() {
     private var vpnInterface: ParcelFileDescriptor? = null
     private var isRunning = false
     private var singBoxProcess: Process? = null
+    private var dnsttProcess: Process? = null
     private val stopRequested = AtomicBoolean(false)
     private var statsThread: Thread? = null
     private var jschManager: JSchTunnelManager? = null
@@ -255,6 +256,16 @@ misc:
 
     /** SSH: JSch membuka SOCKS5 di 10808, hev meneruskan TUN ke situ */
     private fun startSshInjector(first: JSONObject) {
+        val enableSlowDns = first.optBoolean("_enable_slowdns", false)
+        val slowDnsNs = first.optString("_slowdns_ns", "")
+        val slowDnsPubkey = first.optString("_slowdns_pubkey", "")
+        var slowDnsServer = first.optString("_slowdns_server", "8.8.8.8")
+        if (!slowDnsServer.contains(":")) slowDnsServer = "$slowDnsServer:53"
+
+        if (enableSlowDns && slowDnsNs.isNotBlank() && slowDnsPubkey.isNotBlank()) {
+            startDnsttClient(slowDnsServer, slowDnsPubkey, slowDnsNs, 7000)
+        }
+
         val manager = JSchTunnelManager(
             vpnService = this,
             host = first.optString("server", ""),
@@ -267,6 +278,10 @@ misc:
             payload = first.optString("_payload", ""),
             enableProxy = first.optBoolean("_enable_proxy", false),
             remoteProxy = first.optString("_remote_proxy", ""),
+            enableSlowDns = first.optBoolean("_enable_slowdns", false),
+            slowDnsNs = first.optString("_slowdns_ns", ""),
+            slowDnsPubkey = first.optString("_slowdns_pubkey", ""),
+            slowDnsServer = first.optString("_slowdns_server", "8.8.8.8"),
             onLog = { msg -> MainActivity.notifyStateChange("connecting", msg) },
             // SOCKS readiness is not tunnel readiness. The caller marks connected only after TUN/HEV starts.
             onConnected = { MainActivity.notifyStateChange("connecting", "SSH SOCKS siap") },
@@ -344,6 +359,39 @@ misc:
         updateNotification("Izz Tunnel - Terhubung")
         MainActivity.notifyStateChange("connected", null)
         startStatsMonitoring()
+    }
+
+    private fun startDnsttClient(dnsServer: String, pubkey: String, domain: String, localPort: Int) {
+        try {
+            val pubkeyFile = File(filesDir, "dnstt.pub")
+            pubkeyFile.writeText(pubkey.trim())
+
+            val binary = File(applicationInfo.nativeLibraryDir, "libdnstt.so")
+            val cmd = arrayOf(
+                binary.absolutePath,
+                "-udp", dnsServer,
+                "-pubkey-file", pubkeyFile.absolutePath,
+                domain,
+                "127.0.0.1:$localPort"
+            )
+            MainActivity.notifyStateChange("connecting", "Menjalankan Native SlowDNS Engine...")
+            val pb = ProcessBuilder(*cmd)
+            pb.redirectErrorStream(true)
+            val proc = pb.start()
+            dnsttProcess = proc
+
+            Thread {
+                try {
+                    val reader = BufferedReader(InputStreamReader(proc.inputStream))
+                    var line: String?
+                    while (reader.readLine().also { line = it } != null) {
+                        Log.d("DNSTT", line ?: "")
+                    }
+                } catch (_: Throwable) {}
+            }.start()
+        } catch (t: Throwable) {
+            Log.e(TAG, "Gagal memulai dnstt client", t)
+        }
     }
 
     private fun startXray(configFile: File): Boolean {
@@ -470,6 +518,9 @@ misc:
     private fun stopTunnel() {
         stopRequested.set(true)
         isRunning = false
+
+        try { dnsttProcess?.destroy() } catch (_: Throwable) {}
+        dnsttProcess = null
 
         statsThread?.interrupt()
         statsThread = null

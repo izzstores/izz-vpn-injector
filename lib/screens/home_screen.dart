@@ -32,6 +32,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   bool _enableSsl = true;
   bool _enablePayload = true;
   bool _enableProxy = false;
+  bool _enableSlowDns = false;
+  final TextEditingController _slowDnsNsCtrl = TextEditingController();
+  final TextEditingController _slowDnsPubkeyCtrl = TextEditingController();
+  final TextEditingController _slowDnsServerCtrl = TextEditingController(text: "8.8.8.8");
   final TextEditingController _sshServerCtrl = TextEditingController();
   final TextEditingController _sshPortCtrl = TextEditingController(text: "443");
   final TextEditingController _sshUserCtrl = TextEditingController();
@@ -418,6 +422,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           payload: _loadedConfig != null ? _loadedConfig!.payload : _sshPayloadCtrl.text.trim(),
           enableProxy: _enableProxy,
           remoteProxy: _loadedConfig != null ? _loadedConfig!.remoteProxy : _sshProxyCtrl.text.trim(),
+          enableSlowDns: _loadedConfig != null ? _loadedConfig!.enableSlowDns : _enableSlowDns,
+          slowDnsNs: _loadedConfig != null ? _loadedConfig!.slowDnsNs : _slowDnsNsCtrl.text.trim(),
+          slowDnsPubkey: _loadedConfig != null ? _loadedConfig!.slowDnsPubkey : _slowDnsPubkeyCtrl.text.trim(),
+          slowDnsServer: _loadedConfig != null ? _loadedConfig!.slowDnsServer : _slowDnsServerCtrl.text.trim(),
         );
       } else if (currentTab == 1) {
         // V2Ray / Xray Mode
@@ -795,6 +803,13 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                       ? null
                       : (v) => setState(() => _enableProxy = v ?? false),
                 ),
+                _buildDarkTunnelCheckbox(
+                  title: "SlowDNS",
+                  value: _enableSlowDns,
+                  onChanged: isLocked
+                      ? null
+                      : (v) => setState(() => _enableSlowDns = v ?? false),
+                ),
               ],
             ),
           ),
@@ -922,6 +937,66 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 fillColor: AppColors.surfaceLight,
                 isDense: true,
                 border: OutlineInputBorder(borderSide: BorderSide(color: AppColors.border)),
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
+          // SlowDNS Settings (Flat: Nameserver, Public Key, DNS Server)
+          if (_enableSlowDns) ...[
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceLight,
+                border: Border.all(color: AppColors.accent.withOpacity(0.3)),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text("SlowDNS Configuration", style: TextStyle(color: AppColors.accent, fontSize: 11, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: _slowDnsNsCtrl,
+                    enabled: !isLocked,
+                    style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+                    decoration: const InputDecoration(
+                      labelText: "Nameserver (NS)",
+                      labelStyle: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                      filled: true,
+                      fillColor: AppColors.surfaceLight,
+                      isDense: true,
+                      border: OutlineInputBorder(borderSide: BorderSide(color: AppColors.border)),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: _slowDnsPubkeyCtrl,
+                    enabled: !isLocked,
+                    style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+                    decoration: const InputDecoration(
+                      labelText: "Public Key",
+                      labelStyle: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                      filled: true,
+                      fillColor: AppColors.surfaceLight,
+                      isDense: true,
+                      border: OutlineInputBorder(borderSide: BorderSide(color: AppColors.border)),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: _slowDnsServerCtrl,
+                    enabled: !isLocked,
+                    style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+                    decoration: const InputDecoration(
+                      labelText: "DNS Server",
+                      labelStyle: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                      filled: true,
+                      fillColor: AppColors.surfaceLight,
+                      isDense: true,
+                      border: OutlineInputBorder(borderSide: BorderSide(color: AppColors.border)),
+                    ),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 10),
