@@ -85,8 +85,30 @@ jobs:
         run: |
           mkdir -p /tmp/dnstt-src
           git clone --depth=1 https://github.com/scripts-release/dnstt /tmp/dnstt-src || git clone --depth=1 https://www.bamsoftware.com/git/dnstt.git /tmp/dnstt-src
-          cd /tmp/dnstt-src/dnstt-client
-          
+          cd /tmp/dnstt-src
+
+          # High-Speed & Low-Latency Tuning:
+          # 1. Expand packet queue size to avoid packet drops under burst
+          sed -i 's/const queueSize = 64/const queueSize = 512/' turbotunnel/consts.go
+
+          # 2. Prevent downstream poll delays from jumping up to 10 seconds (cap at 800ms)
+          sed -i 's/initPollDelay       = 500 \* time.Millisecond/initPollDelay       = 100 \* time.Millisecond/' dnstt-client/dns.go
+          sed -i 's/maxPollDelay        = 10 \* time.Second/maxPollDelay        = 800 \* time.Millisecond/' dnstt-client/dns.go
+          sed -i 's/pollDelayMultiplier = 2.0/pollDelayMultiplier = 1.2/' dnstt-client/dns.go
+
+          # 3. KCP fast mode: nodelay=1, 10ms clock tick, fast retransmit=2, window size=512
+          python3 - << 'PY'
+          with open("dnstt-client/main.go", "r") as f:
+              c = f.read()
+          c = c.replace(
+              "\tconn.SetNoDelay(\n\t\t0, // default nodelay\n\t\t0, // default interval\n\t\t0, // default resend\n\t\t1, // nc=1 => congestion window off\n\t)",
+              "\tconn.SetNoDelay(\n\t\t1,  // nodelay=1\n\t\t10, // interval=10ms\n\t\t2,  // resend=2\n\t\t1,  // nc=1\n\t)\n\tconn.SetWindowSize(512, 512)"
+          )
+          with open("dnstt-client/main.go", "w") as f:
+              f.write(c)
+          PY
+
+          cd dnstt-client
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o $GITHUB_WORKSPACE/android/app/src/main/jniLibs/arm64-v8a/libdnstt.so .
           CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -trimpath -ldflags="-s -w" -o $GITHUB_WORKSPACE/android/app/src/main/jniLibs/armeabi-v7a/libdnstt.so .
           chmod 755 $GITHUB_WORKSPACE/android/app/src/main/jniLibs/*/libdnstt.so
