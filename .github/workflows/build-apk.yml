@@ -2,7 +2,7 @@ name: Build & Release Android APK
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, feat/slowdns-adaptive-engine ]
   workflow_dispatch:
 
 permissions:
