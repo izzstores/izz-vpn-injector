@@ -33,6 +33,10 @@ class JSchTunnelManager(
     private val payload: String,
     private val enableProxy: Boolean,
     private val remoteProxy: String,
+    private val enableSlowDns: Boolean = false,
+    private val slowDnsNs: String = "",
+    private val slowDnsPubkey: String = "",
+    private val slowDnsServer: String = "8.8.8.8",
     private val onLog: (String) -> Unit,
     private val onConnected: () -> Unit,
     private val onError: (String) -> Unit
@@ -63,7 +67,11 @@ class JSchTunnelManager(
                         val targetHost: String
                         val targetPort: Int
 
-                        if (enableProxy && remoteProxy.isNotBlank()) {
+                        if (enableSlowDns && slowDnsNs.isNotBlank() && slowDnsPubkey.isNotBlank()) {
+                            targetHost = "127.0.0.1"
+                            targetPort = 7000
+                            onLog("Menggunakan SlowDNS Tunnel ($slowDnsNs via $slowDnsServer)...")
+                        } else if (enableProxy && remoteProxy.isNotBlank()) {
                             val parts = remoteProxy.split(":")
                             targetHost = parts[0].trim()
                             targetPort = if (parts.size > 1) parts[1].trim().toIntOrNull() ?: 8080 else 8080

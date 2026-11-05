@@ -32,6 +32,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   bool _enableSsl = true;
   bool _enablePayload = true;
   bool _enableProxy = false;
+  bool _enableSlowDns = false;
+  final TextEditingController _slowDnsNsCtrl = TextEditingController();
+  final TextEditingController _slowDnsPubkeyCtrl = TextEditingController();
+  final TextEditingController _slowDnsServerCtrl = TextEditingController(text: "8.8.8.8");
   final TextEditingController _sshServerCtrl = TextEditingController();
   final TextEditingController _sshPortCtrl = TextEditingController(text: "443");
   final TextEditingController _sshUserCtrl = TextEditingController();
@@ -103,35 +107,33 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
     _vpnStateSub = VpnService.stateStream.listen((state) {
       if (!mounted) return;
-      setState(() {
-        _vpnState = state;
-        if (state == VpnState.connected) {
-          _connectionWasEstablished = true;
-          _reconnectScheduled = false;
-          _addLog("Status: CONNECTED! Tunnel interface active.");
-          _startDurationTimer();
-        } else if (state == VpnState.connecting) {
-          _addLog("Status: Connecting to remote endpoint...");
-        } else if (state == VpnState.authenticating) {
-          _addLog("Status: Handshaking & Authenticating...");
-        } else if (state == VpnState.error) {
-          final errMsg = VpnService.lastErrorMessage;
-          if (errMsg != null && errMsg.isNotEmpty) {
-            _addLog("Status: ERROR - $errMsg");
-          } else {
-            _addLog("Status: ERROR - Connection aborted or timed out.");
-          }
-          _stopDurationTimer();
-          _scheduleReconnectIfNeeded();
-        } else {
-          _addLog("Status: Disconnected.");
-          _stopDurationTimer();
-          _scheduleReconnectIfNeeded();
-        }
-      });
+      final wasEstablished = _connectionWasEstablished;
+      setState(() => _vpnState = state);
+      if (state == VpnState.connected) {
+        _connectionWasEstablished = true;
+        _reconnectScheduled = false;
+        _addLog("Status: CONNECTED! Tunnel interface active.");
+        _startDurationTimer();
+      } else if (state == VpnState.connecting) {
+        _addLog("Status: Connecting to remote endpoint...");
+      } else if (state == VpnState.authenticating) {
+        _addLog("Status: Handshaking & Authenticating...");
+      } else if (state == VpnState.error) {
+        final errMsg = VpnService.lastErrorMessage;
+        _addLog(errMsg != null && errMsg.isNotEmpty
+            ? "Status: ERROR - $errMsg"
+            : "Status: ERROR - Connection aborted or timed out.");
+        _stopDurationTimer();
+        if (wasEstablished) _scheduleReconnectIfNeeded();
+      } else {
+        _addLog("Status: Disconnected.");
+        _stopDurationTimer();
+        if (wasEstablished) _scheduleReconnectIfNeeded();
+      }
     });
 
     _vpnStatsSub = VpnService.statsStream.listen((stats) {
+      if (!mounted) return;
       setState(() {
         _ping = "${stats['ping_ms'] ?? '--'} ms";
         _download = "${stats['down_speed'] ?? '0 KB/s'}";
@@ -239,6 +241,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       _enableSsl = prefs.getBool("ssh_ssl") ?? true;
       _enablePayload = prefs.getBool("ssh_payload_enable") ?? true;
       _enableProxy = prefs.getBool("ssh_proxy_enable") ?? false;
+      _enableSlowDns = prefs.getBool("ssh_slowdns_enable") ?? false;
+      _slowDnsNsCtrl.text = prefs.getString("ssh_slowdns_ns") ?? "";
+      _slowDnsPubkeyCtrl.text = prefs.getString("ssh_slowdns_pubkey") ?? "";
+      _slowDnsServerCtrl.text = prefs.getString("ssh_slowdns_server") ?? "8.8.8.8";
       _sshUserCtrl.text = prefs.getString("ssh_user") ?? "";
       _sshPassCtrl.text = prefs.getString("ssh_pass") ?? "";
       _sshSniCtrl.text = prefs.getString("ssh_sni") ?? "";
@@ -260,6 +266,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     await prefs.setBool("ssh_ssl", _enableSsl);
     await prefs.setBool("ssh_payload_enable", _enablePayload);
     await prefs.setBool("ssh_proxy_enable", _enableProxy);
+    await prefs.setBool("ssh_slowdns_enable", _enableSlowDns);
+    await prefs.setString("ssh_slowdns_ns", _slowDnsNsCtrl.text);
+    await prefs.setString("ssh_slowdns_pubkey", _slowDnsPubkeyCtrl.text);
+    await prefs.setString("ssh_slowdns_server", _slowDnsServerCtrl.text);
     await prefs.setString("ssh_user", _sshUserCtrl.text);
     await prefs.setString("ssh_pass", _sshPassCtrl.text);
     await prefs.setString("ssh_sni", _sshSniCtrl.text);
@@ -338,6 +348,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         _enableSsl = config.sshMethod.contains("ssl") || config.port == 443;
         _enablePayload = config.payload.isNotEmpty || config.sshMethod.contains("ws");
         _enableProxy = config.remoteProxy.isNotEmpty || config.sshMethod == "http_proxy";
+        _enableSlowDns = config.enableSlowDns;
+        _slowDnsNsCtrl.text = config.slowDnsNs;
+        _slowDnsPubkeyCtrl.text = config.slowDnsPubkey;
+        _slowDnsServerCtrl.text = config.slowDnsServer.isNotEmpty ? config.slowDnsServer : "8.8.8.8";
         _sshServerCtrl.text = config.server;
         _sshPortCtrl.text = config.port.toString();
         // A locked account keeps credentials in the loaded model only.
@@ -403,6 +417,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           if (_enableSsl) "SSL",
           if (_enablePayload) "Payload",
           if (_enableProxy) "Proxy",
+          if (_enableSlowDns) "SlowDNS",
         ].join(" + ");
         _addLog("Building SSH Config (${modeDesc.isEmpty ? 'Direct' : modeDesc}, Host: ${_sshServerCtrl.text.trim()})...");
         configJson = ConfigBuilder.buildSsh(
@@ -415,11 +430,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               ? _loadedConfig!.password
               : _sshPassCtrl.text.trim(),
           enableSsl: _enableSsl,
-          sni: _loadedConfig != null ? _loadedConfig!.sni : _sshSniCtrl.text.trim(),
+          sni: _loadedConfig != null && _loadedConfig!.sni.isNotEmpty ? _loadedConfig!.sni : _sshSniCtrl.text.trim(),
           enablePayload: _enablePayload,
-          payload: _loadedConfig != null ? _loadedConfig!.payload : _sshPayloadCtrl.text.trim(),
+          payload: _loadedConfig != null && _loadedConfig!.payload.isNotEmpty ? _loadedConfig!.payload : _sshPayloadCtrl.text.trim(),
           enableProxy: _enableProxy,
-          remoteProxy: _loadedConfig != null ? _loadedConfig!.remoteProxy : _sshProxyCtrl.text.trim(),
+          remoteProxy: _loadedConfig != null && _loadedConfig!.remoteProxy.isNotEmpty ? _loadedConfig!.remoteProxy : _sshProxyCtrl.text.trim(),
+          enableSlowDns: _enableSlowDns || (_loadedConfig?.enableSlowDns == true),
+          slowDnsNs: _slowDnsNsCtrl.text.trim().isNotEmpty ? _slowDnsNsCtrl.text.trim() : (_loadedConfig?.slowDnsNs ?? ""),
+          slowDnsPubkey: _slowDnsPubkeyCtrl.text.trim().isNotEmpty ? _slowDnsPubkeyCtrl.text.trim() : (_loadedConfig?.slowDnsPubkey ?? ""),
+          slowDnsServer: _slowDnsServerCtrl.text.trim().isNotEmpty ? _slowDnsServerCtrl.text.trim() : (_loadedConfig?.slowDnsServer ?? "8.8.8.8"),
         );
       } else if (currentTab == 1) {
         // V2Ray / Xray Mode
@@ -630,6 +649,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 v2rayTransport: _v2rayTransport,
                 v2rayPath: _v2rayPathCtrl.text,
                 v2rayTls: _v2rayTls,
+                enableSlowDns: _enableSlowDns,
+                slowDnsNs: _slowDnsNsCtrl.text.trim(),
+                slowDnsPubkey: _slowDnsPubkeyCtrl.text.trim(),
+                slowDnsServer: _slowDnsServerCtrl.text.trim(),
                 onSaved: () => setState(() {}),
               );
             } else if (val == "clear") {
@@ -797,6 +820,13 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                       ? null
                       : (v) => setState(() => _enableProxy = v ?? false),
                 ),
+                _buildDarkTunnelCheckbox(
+                  title: "SlowDNS",
+                  value: _enableSlowDns,
+                  onChanged: isLocked
+                      ? null
+                      : (v) => setState(() => _enableSlowDns = v ?? false),
+                ),
               ],
             ),
           ),
@@ -924,6 +954,66 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 fillColor: AppColors.surfaceLight,
                 isDense: true,
                 border: OutlineInputBorder(borderSide: BorderSide(color: AppColors.border)),
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
+          // SlowDNS Settings (Flat: Nameserver, Public Key, DNS Server)
+          if (_enableSlowDns) ...[
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceLight,
+                border: Border.all(color: AppColors.primaryLight.withOpacity(0.3)),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text("SlowDNS Configuration", style: TextStyle(color: AppColors.primaryLight, fontSize: 11, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: _slowDnsNsCtrl,
+                    enabled: !isLocked,
+                    style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+                    decoration: const InputDecoration(
+                      labelText: "Nameserver (NS)",
+                      labelStyle: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                      filled: true,
+                      fillColor: AppColors.surfaceLight,
+                      isDense: true,
+                      border: OutlineInputBorder(borderSide: BorderSide(color: AppColors.border)),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: _slowDnsPubkeyCtrl,
+                    enabled: !isLocked,
+                    style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+                    decoration: const InputDecoration(
+                      labelText: "Public Key",
+                      labelStyle: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                      filled: true,
+                      fillColor: AppColors.surfaceLight,
+                      isDense: true,
+                      border: OutlineInputBorder(borderSide: BorderSide(color: AppColors.border)),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: _slowDnsServerCtrl,
+                    enabled: !isLocked,
+                    style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+                    decoration: const InputDecoration(
+                      labelText: "DNS Server",
+                      labelStyle: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                      filled: true,
+                      fillColor: AppColors.surfaceLight,
+                      isDense: true,
+                      border: OutlineInputBorder(borderSide: BorderSide(color: AppColors.border)),
+                    ),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 10),

@@ -21,6 +21,12 @@ class SavedConfigModel {
   final String v2rayPath;
   final String v2rayTls;
 
+  // SlowDNS fields
+  final bool enableSlowDns;
+  final String slowDnsNs;
+  final String slowDnsPubkey;
+  final String slowDnsServer;
+
   // Locks (Classic HTTP Custom)
   final bool isLocked; // lock payload, sni, proxy from editing/viewing
   final bool isAccountLocked; // lock SSH server, username, and password
@@ -47,6 +53,10 @@ class SavedConfigModel {
     this.v2rayTransport = "ws",
     this.v2rayPath = "/vmess-ws",
     this.v2rayTls = "tls",
+    this.enableSlowDns = false,
+    this.slowDnsNs = "",
+    this.slowDnsPubkey = "",
+    this.slowDnsServer = "8.8.8.8",
     this.isLocked = false,
     this.isAccountLocked = false,
     this.expiryDate,
@@ -79,6 +89,10 @@ class SavedConfigModel {
       'v2rayTransport': v2rayTransport,
       'v2rayPath': v2rayPath,
       'v2rayTls': v2rayTls,
+      'enableSlowDns': enableSlowDns,
+      'slowDnsNs': slowDnsNs,
+      'slowDnsPubkey': slowDnsPubkey,
+      'slowDnsServer': slowDnsServer,
       'isLocked': isLocked,
       'isAccountLocked': isAccountLocked,
       'expiryDate': expiryDate?.toIso8601String(),
@@ -107,6 +121,10 @@ class SavedConfigModel {
       v2rayTransport: json['v2rayTransport'] ?? 'ws',
       v2rayPath: json['v2rayPath'] ?? '/vmess-ws',
       v2rayTls: json['v2rayTls'] ?? 'tls',
+      enableSlowDns: json['enableSlowDns'] == true,
+      slowDnsNs: json['slowDnsNs'] ?? '',
+      slowDnsPubkey: json['slowDnsPubkey'] ?? '',
+      slowDnsServer: json['slowDnsServer'] ?? '8.8.8.8',
       isLocked: json['isLocked'] == true,
       isAccountLocked: json['isAccountLocked'] == true,
       expiryDate: json['expiryDate'] != null ? DateTime.tryParse(json['expiryDate']) : null,

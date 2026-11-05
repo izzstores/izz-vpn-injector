@@ -25,6 +25,7 @@ class IzzVpnService : VpnService() {
     private var vpnInterface: ParcelFileDescriptor? = null
     private var isRunning = false
     private var singBoxProcess: Process? = null
+    private var dnsttProcess: Process? = null
     private val stopRequested = AtomicBoolean(false)
     private var statsThread: Thread? = null
     private var jschManager: JSchTunnelManager? = null
@@ -169,6 +170,16 @@ misc:
 
     /** SSH: JSch membuka SOCKS5 di 10808, hev meneruskan TUN ke situ */
     private fun startSshInjector(first: JSONObject) {
+        val enableSlowDns = first.optBoolean("_enable_slowdns", false)
+        val slowDnsNs = first.optString("_slowdns_ns", "")
+        val slowDnsPubkey = first.optString("_slowdns_pubkey", "")
+        var slowDnsServer = first.optString("_slowdns_server", "8.8.8.8")
+        if (!slowDnsServer.contains(":")) slowDnsServer = "$slowDnsServer:53"
+
+        if (enableSlowDns && slowDnsNs.isNotBlank() && slowDnsPubkey.isNotBlank()) {
+            startDnsttClient(slowDnsServer, slowDnsPubkey, slowDnsNs, 7000)
+        }
+
         val manager = JSchTunnelManager(
             vpnService = this,
             host = first.optString("server", ""),
@@ -181,6 +192,10 @@ misc:
             payload = first.optString("_payload", ""),
             enableProxy = first.optBoolean("_enable_proxy", false),
             remoteProxy = first.optString("_remote_proxy", ""),
+            enableSlowDns = enableSlowDns,
+            slowDnsNs = slowDnsNs,
+            slowDnsPubkey = slowDnsPubkey,
+            slowDnsServer = slowDnsServer,
             onLog = { msg -> MainActivity.notifyStateChange("connecting", msg) },
             onConnected = { markConnected() },
             onError = { err ->
@@ -190,6 +205,84 @@ misc:
         )
         jschManager = manager
         manager.start()
+    }
+
+    private fun startDnsttClient(dnsServer: String, pubkey: String, domain: String, localPort: Int) {
+        try {
+            val pubkeyFile = File(filesDir, "dnstt.pub")
+            pubkeyFile.writeText(pubkey.trim())
+
+            val binary = File(applicationInfo.nativeLibraryDir, "libdnstt.so")
+            val executableBinary: File
+            if (binary.exists() && binary.canExecute()) {
+                executableBinary = binary
+            } else {
+                val internalBin = File(filesDir, "dnstt-client")
+                if (binary.exists()) {
+                    binary.copyTo(internalBin, overwrite = true)
+                } else {
+                    try {
+                        val zip = java.util.zip.ZipFile(applicationInfo.sourceDir)
+                        val abi = if (Build.SUPPORTED_ABIS.contains("arm64-v8a")) "arm64-v8a" else "armeabi-v7a"
+                        val entry = zip.getEntry("lib/$abi/libdnstt.so")
+                        if (entry != null) {
+                            zip.getInputStream(entry).use { input ->
+                                internalBin.outputStream().use { output -> input.copyTo(output) }
+                            }
+                        }
+                        zip.close()
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Gagal extract libdnstt.so dari APK", e)
+                    }
+                }
+                internalBin.setExecutable(true, false)
+                executableBinary = internalBin
+            }
+
+            MainActivity.notifyStateChange("connecting", "Menjalankan SlowDNS Client ($domain)...")
+
+            val cmd = arrayOf(
+                executableBinary.absolutePath,
+                "-udp", dnsServer,
+                "-pubkey-file", pubkeyFile.absolutePath,
+                domain,
+                "127.0.0.1:$localPort"
+            )
+            val pb = ProcessBuilder(*cmd)
+            pb.directory(filesDir)
+            pb.redirectErrorStream(true)
+            val proc = pb.start()
+            dnsttProcess = proc
+
+            Thread {
+                try {
+                    val reader = BufferedReader(InputStreamReader(proc.inputStream))
+                    var line: String?
+                    while (reader.readLine().also { line = it } != null) {
+                        Log.d("DNSTT", line ?: "")
+                        if (line != null && line!!.isNotBlank()) {
+                            MainActivity.notifyStateChange("connecting", "[DNSTT] ${line!!.take(80)}")
+                        }
+                    }
+                } catch (_: Throwable) {}
+            }.start()
+
+            // Tunggu sebentar hingga port 7000 terbuka
+            for (i in 1..25) {
+                try {
+                    val s = Socket()
+                    s.connect(InetSocketAddress("127.0.0.1", localPort), 200)
+                    s.close()
+                    MainActivity.notifyStateChange("connecting", "SlowDNS Port $localPort Siap!")
+                    break
+                } catch (_: Exception) {
+                    Thread.sleep(200)
+                }
+            }
+        } catch (t: Throwable) {
+            Log.e(TAG, "Gagal memulai dnstt client", t)
+            MainActivity.notifyStateChange("connecting", "SlowDNS Error: ${t.message}")
+        }
     }
 
     /** Xray-core resmi sebagai proxy lokal; TUN tetap dipegang Android + hev. */
@@ -390,6 +483,9 @@ misc:
             try { TProxyService.TProxyStopService() } catch (_: Throwable) {}
             hevStarted = false
         }
+
+        try { dnsttProcess?.destroy() } catch (_: Exception) {}
+        dnsttProcess = null
 
         try { singBoxProcess?.destroy() } catch (_: Exception) {}
         singBoxProcess = null
