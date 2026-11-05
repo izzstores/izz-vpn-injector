@@ -241,6 +241,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       _enableSsl = prefs.getBool("ssh_ssl") ?? true;
       _enablePayload = prefs.getBool("ssh_payload_enable") ?? true;
       _enableProxy = prefs.getBool("ssh_proxy_enable") ?? false;
+      _enableSlowDns = prefs.getBool("ssh_slowdns_enable") ?? false;
+      _slowDnsNsCtrl.text = prefs.getString("ssh_slowdns_ns") ?? "";
+      _slowDnsPubkeyCtrl.text = prefs.getString("ssh_slowdns_pubkey") ?? "";
+      _slowDnsServerCtrl.text = prefs.getString("ssh_slowdns_server") ?? "8.8.8.8";
       _sshUserCtrl.text = prefs.getString("ssh_user") ?? "";
       _sshPassCtrl.text = prefs.getString("ssh_pass") ?? "";
       _sshSniCtrl.text = prefs.getString("ssh_sni") ?? "";
@@ -262,6 +266,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     await prefs.setBool("ssh_ssl", _enableSsl);
     await prefs.setBool("ssh_payload_enable", _enablePayload);
     await prefs.setBool("ssh_proxy_enable", _enableProxy);
+    await prefs.setBool("ssh_slowdns_enable", _enableSlowDns);
+    await prefs.setString("ssh_slowdns_ns", _slowDnsNsCtrl.text);
+    await prefs.setString("ssh_slowdns_pubkey", _slowDnsPubkeyCtrl.text);
+    await prefs.setString("ssh_slowdns_server", _slowDnsServerCtrl.text);
     await prefs.setString("ssh_user", _sshUserCtrl.text);
     await prefs.setString("ssh_pass", _sshPassCtrl.text);
     await prefs.setString("ssh_sni", _sshSniCtrl.text);
@@ -409,6 +417,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           if (_enableSsl) "SSL",
           if (_enablePayload) "Payload",
           if (_enableProxy) "Proxy",
+          if (_enableSlowDns) "SlowDNS",
         ].join(" + ");
         _addLog("Building SSH Config (${modeDesc.isEmpty ? 'Direct' : modeDesc}, Host: ${_sshServerCtrl.text.trim()})...");
         configJson = ConfigBuilder.buildSsh(
@@ -421,15 +430,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               ? _loadedConfig!.password
               : _sshPassCtrl.text.trim(),
           enableSsl: _enableSsl,
-          sni: _loadedConfig != null ? _loadedConfig!.sni : _sshSniCtrl.text.trim(),
+          sni: _loadedConfig != null && _loadedConfig!.sni.isNotEmpty ? _loadedConfig!.sni : _sshSniCtrl.text.trim(),
           enablePayload: _enablePayload,
-          payload: _loadedConfig != null ? _loadedConfig!.payload : _sshPayloadCtrl.text.trim(),
+          payload: _loadedConfig != null && _loadedConfig!.payload.isNotEmpty ? _loadedConfig!.payload : _sshPayloadCtrl.text.trim(),
           enableProxy: _enableProxy,
-          remoteProxy: _loadedConfig != null ? _loadedConfig!.remoteProxy : _sshProxyCtrl.text.trim(),
-          enableSlowDns: _loadedConfig != null ? _loadedConfig!.enableSlowDns : _enableSlowDns,
-          slowDnsNs: _loadedConfig != null ? _loadedConfig!.slowDnsNs : _slowDnsNsCtrl.text.trim(),
-          slowDnsPubkey: _loadedConfig != null ? _loadedConfig!.slowDnsPubkey : _slowDnsPubkeyCtrl.text.trim(),
-          slowDnsServer: _loadedConfig != null ? _loadedConfig!.slowDnsServer : _slowDnsServerCtrl.text.trim(),
+          remoteProxy: _loadedConfig != null && _loadedConfig!.remoteProxy.isNotEmpty ? _loadedConfig!.remoteProxy : _sshProxyCtrl.text.trim(),
+          enableSlowDns: _enableSlowDns || (_loadedConfig?.enableSlowDns == true),
+          slowDnsNs: _slowDnsNsCtrl.text.trim().isNotEmpty ? _slowDnsNsCtrl.text.trim() : (_loadedConfig?.slowDnsNs ?? ""),
+          slowDnsPubkey: _slowDnsPubkeyCtrl.text.trim().isNotEmpty ? _slowDnsPubkeyCtrl.text.trim() : (_loadedConfig?.slowDnsPubkey ?? ""),
+          slowDnsServer: _slowDnsServerCtrl.text.trim().isNotEmpty ? _slowDnsServerCtrl.text.trim() : (_loadedConfig?.slowDnsServer ?? "8.8.8.8"),
         );
       } else if (currentTab == 1) {
         // V2Ray / Xray Mode

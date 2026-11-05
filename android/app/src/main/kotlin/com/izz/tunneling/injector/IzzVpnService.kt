@@ -101,7 +101,8 @@ class IzzVpnService : VpnService() {
                 // Starting TUN first can make legacy HEV accept packets while
                 // 127.0.0.1:10808 is not listening yet, causing connected-without-internet.
                 startSshInjector(first)
-                if (!waitForLocalPort(LOCAL_PROXY_PORT, 15000)) {
+                val timeoutWait = if (first.optBoolean("_enable_slowdns", false)) 30000L else 15000L
+                if (!waitForLocalPort(LOCAL_PROXY_PORT, timeoutWait)) {
                     failureReported = true
                     MainActivity.notifyStateChange("error", "SOCKS SSH tidak siap; tunnel tidak dilanjutkan")
                     stopTunnel()
@@ -405,6 +406,7 @@ misc:
                 domain,
                 "127.0.0.1:$localPort"
             )
+            MainActivity.notifyStateChange("connecting", "Cmd: ${cmd.joinToString(" ")}")
             MainActivity.notifyStateChange("connecting", "Menjalankan Native SlowDNS Engine...")
             val pb = ProcessBuilder(*cmd)
             pb.directory(filesDir)
