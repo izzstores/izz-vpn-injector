@@ -367,8 +367,20 @@ misc:
             pubkeyFile.writeText(pubkey.trim())
 
             val binary = File(applicationInfo.nativeLibraryDir, "libdnstt.so")
+            val executableBinary: File
+            if (!binary.exists() || !binary.canExecute()) {
+                val internalBin = File(filesDir, "dnstt-client")
+                if (binary.exists()) {
+                    binary.copyTo(internalBin, overwrite = true)
+                }
+                internalBin.setExecutable(true, false)
+                executableBinary = internalBin
+            } else {
+                executableBinary = binary
+            }
+
             val cmd = arrayOf(
-                binary.absolutePath,
+                executableBinary.absolutePath,
                 "-udp", dnsServer,
                 "-pubkey-file", pubkeyFile.absolutePath,
                 domain,
@@ -376,6 +388,7 @@ misc:
             )
             MainActivity.notifyStateChange("connecting", "Menjalankan Native SlowDNS Engine...")
             val pb = ProcessBuilder(*cmd)
+            pb.directory(filesDir)
             pb.redirectErrorStream(true)
             val proc = pb.start()
             dnsttProcess = proc
@@ -386,11 +399,28 @@ misc:
                     var line: String?
                     while (reader.readLine().also { line = it } != null) {
                         Log.d("DNSTT", line ?: "")
+                        if (line != null && line!!.isNotBlank()) {
+                            MainActivity.notifyStateChange("connecting", "[DNSTT] ${line!!.take(80)}")
+                        }
                     }
                 } catch (_: Throwable) {}
             }.start()
+
+            // Tunggu port 7000 terbuka sebelum JSch mencoba konek
+            for (i in 1..25) {
+                try {
+                    val s = Socket()
+                    s.connect(InetSocketAddress("127.0.0.1", localPort), 200)
+                    s.close()
+                    MainActivity.notifyStateChange("connecting", "SlowDNS Port $localPort Siap!")
+                    break
+                } catch (_: Exception) {
+                    Thread.sleep(200)
+                }
+            }
         } catch (t: Throwable) {
             Log.e(TAG, "Gagal memulai dnstt client", t)
+            MainActivity.notifyStateChange("connecting", "SlowDNS Error: ${t.message}")
         }
     }
 
